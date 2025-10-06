@@ -38,13 +38,11 @@ jobs:
           ENV="${{ steps.env.outputs.env }}"
           
           if [ "$ENV" = "production" ]; then
-            echo "ssh_key=${{ secrets.KINSTAPROD_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "host=${{ secrets.KINSTAPROD_HOST }}" >> $GITHUB_OUTPUT
             echo "port=${{ secrets.KINSTAPROD_PORT }}" >> $GITHUB_OUTPUT
             echo "user=${{ secrets.KINSTAPROD_USER }}" >> $GITHUB_OUTPUT
             echo "plugins_base=${{ secrets.KINSTAPROD_PLUGINS_BASE }}" >> $GITHUB_OUTPUT
           else
-            echo "ssh_key=${{ secrets.KINSTA_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "host=${{ secrets.KINSTA_HOST }}" >> $GITHUB_OUTPUT
             echo "port=${{ secrets.KINSTA_PORT }}" >> $GITHUB_OUTPUT
             echo "user=${{ secrets.KINSTA_USER }}" >> $GITHUB_OUTPUT
@@ -54,9 +52,16 @@ jobs:
           echo "environment=$ENV" >> $GITHUB_OUTPUT
 
       - name: Setup SSH key
+        env:
+          SSH_KEY_STAGING: ${{ secrets.KINSTA_SSH_KEY }}
+          SSH_KEY_PROD: ${{ secrets.KINSTAPROD_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ steps.vars.outputs.ssh_key }}" > ~/.ssh/kinsta_key
+          if [ "${{ steps.vars.outputs.environment }}" = "production" ]; then
+            echo "$SSH_KEY_PROD" > ~/.ssh/kinsta_key
+          else
+            echo "$SSH_KEY_STAGING" > ~/.ssh/kinsta_key
+          fi
           chmod 600 ~/.ssh/kinsta_key
           ssh-keyscan -p ${{ steps.vars.outputs.port }} ${{ steps.vars.outputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
 
