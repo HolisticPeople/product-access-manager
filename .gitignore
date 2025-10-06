@@ -1,0 +1,33 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE Files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+debug.log
+error_log
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build Files
+*.zip
+dist/
+
+# Environment
+.env
+.env.local
+
+# Documentation (local setup guides only, not needed in GitHub)
+DEPLOYMENT-SETUP.md
+GITHUB-SECRETS-TEMPLATE.md
+QUICK-START.md
+SETUP-CHECKLIST.md
+START-HERE.md

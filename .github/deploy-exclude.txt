@@ -1,0 +1,16 @@
+.git/
+.github/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+*.zip
+node_modules/
+vendor/
+DEPLOYMENT-SETUP.md
+GITHUB-SECRETS-TEMPLATE.md
+QUICK-START.md
+SETUP-CHECKLIST.md
+START-HERE.md
+Plans and reports/

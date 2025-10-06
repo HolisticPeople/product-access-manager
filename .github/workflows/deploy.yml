@@ -1,0 +1,85 @@
+name: Deploy Product Access Manager to Kinsta
+
+on:
+  push:
+    branches:
+      - dev  # Auto-deploy to staging on push to dev
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "env=staging" >> $GITHUB_OUTPUT
+          else
+            echo "env=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set environment variables
+        id: vars
+        run: |
+          ENV="${{ steps.env.outputs.env }}"
+          
+          if [ "$ENV" = "production" ]; then
+            echo "ssh_key=${{ secrets.KINSTAPROD_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "host=${{ secrets.KINSTAPROD_HOST }}" >> $GITHUB_OUTPUT
+            echo "port=${{ secrets.KINSTAPROD_PORT }}" >> $GITHUB_OUTPUT
+            echo "user=${{ secrets.KINSTAPROD_USER }}" >> $GITHUB_OUTPUT
+            echo "plugins_base=${{ secrets.KINSTAPROD_PLUGINS_BASE }}" >> $GITHUB_OUTPUT
+          else
+            echo "ssh_key=${{ secrets.KINSTA_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "host=${{ secrets.KINSTA_HOST }}" >> $GITHUB_OUTPUT
+            echo "port=${{ secrets.KINSTA_PORT }}" >> $GITHUB_OUTPUT
+            echo "user=${{ secrets.KINSTA_USER }}" >> $GITHUB_OUTPUT
+            echo "plugins_base=${{ secrets.KINSTA_PLUGINS_BASE }}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ steps.vars.outputs.ssh_key }}" > ~/.ssh/kinsta_key
+          chmod 600 ~/.ssh/kinsta_key
+          ssh-keyscan -p ${{ steps.vars.outputs.port }} ${{ steps.vars.outputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to ${{ steps.vars.outputs.environment }}
+        run: |
+          PLUGIN_PATH="${{ steps.vars.outputs.plugins_base }}/${{ secrets.PLUGIN_FOLDER_NAME }}"
+          
+          echo "Deploying to: ${{ steps.vars.outputs.environment }}"
+          echo "Target path: $PLUGIN_PATH"
+          
+          # Create plugin directory if it doesn't exist
+          ssh -i ~/.ssh/kinsta_key -p ${{ steps.vars.outputs.port }} \
+            ${{ steps.vars.outputs.user }}@${{ steps.vars.outputs.host }} \
+            "mkdir -p $PLUGIN_PATH"
+          
+          # Deploy files using rsync
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/kinsta_key -p ${{ steps.vars.outputs.port }}" \
+            --exclude-from='.github/deploy-exclude.txt' \
+            ./ ${{ steps.vars.outputs.user }}@${{ steps.vars.outputs.host }}:$PLUGIN_PATH/
+          
+          echo "✅ Deployment to ${{ steps.vars.outputs.environment }} complete!"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/kinsta_key
