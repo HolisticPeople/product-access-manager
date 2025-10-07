@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.2
+ * Version: 1.0.3
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.2' );
+define( 'PAM_VERSION', '1.0.3' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -65,7 +65,12 @@ add_action( 'init', function () {
     add_action( 'pre_get_posts', 'pam_filter_query' );
     add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_product_query', 10, 2 );
     
-    // FiboSearch integration
+    // FiboSearch integration (TNT Search Engine - v1.31+)
+    add_filter( 'dgwt/wcas/tnt/search_results/products', 'pam_filter_fibo_tnt_products', 10, 3 );
+    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_tnt_product_suggestion', 10, 2 );
+    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_tnt_taxonomy_suggestion', 10, 2 );
+    
+    // Legacy FiboSearch hooks (for older versions)
     add_filter( 'dgwt/wcas/products', 'pam_filter_fibo_products', 10, 2 );
     add_filter( 'dgwt/wcas/suggestions', 'pam_filter_fibo_products', 10, 2 );
     add_filter( 'dgwt/wcas/suggestion', 'pam_filter_fibo_single', 10, 2 );
@@ -351,6 +356,105 @@ function pam_filter_fibo_single( $suggestion, $context ) {
     }
 
     pam_log( 'FiboSearch single filter: keep non-product suggestion.' );
+
+    return $suggestion;
+}
+
+// ============================================================================
+// FIBOSEARCH TNT SEARCH ENGINE INTEGRATION (v1.31+)
+// ============================================================================
+
+/**
+ * Filter FiboSearch TNT products array
+ * Hook: dgwt/wcas/tnt/search_results/products
+ */
+function pam_filter_fibo_tnt_products( $products, $phrase, $lang ) {
+    pam_log( '=== TNT PRODUCTS FILTER CALLED ===' );
+    pam_log( 'TNT products count: ' . count( $products ) . ' | phrase: ' . $phrase );
+    
+    if ( pam_user_has_full_access() ) {
+        pam_log( 'TNT products filter: user has full access' );
+        return $products;
+    }
+
+    $restricted_ids = pam_get_restricted_product_ids();
+    if ( empty( $restricted_ids ) ) {
+        pam_log( 'TNT products filter: no restricted products' );
+        return $products;
+    }
+
+    $filtered = array();
+    foreach ( $products as $product ) {
+        $product_id = isset( $product->id ) ? (int) $product->id : 0;
+        
+        if ( $product_id && in_array( $product_id, $restricted_ids, true ) ) {
+            pam_log( 'TNT products filter: skipping restricted product ID ' . $product_id );
+            continue;
+        }
+        
+        $filtered[] = $product;
+    }
+
+    pam_log( 'TNT products filter: kept ' . count( $filtered ) . ' of ' . count( $products ) . ' products' );
+    return $filtered;
+}
+
+/**
+ * Filter FiboSearch TNT product suggestion
+ * Hook: dgwt/wcas/tnt/search_results/suggestion/product
+ */
+function pam_filter_fibo_tnt_product_suggestion( $suggestion, $product ) {
+    pam_log( '=== TNT PRODUCT SUGGESTION FILTER CALLED ===' );
+    
+    if ( pam_user_has_full_access() ) {
+        return $suggestion;
+    }
+
+    $product_id = isset( $product->id ) ? (int) $product->id : 0;
+    if ( ! $product_id ) {
+        return $suggestion;
+    }
+
+    $restricted_ids = pam_get_restricted_product_ids();
+    if ( ! empty( $restricted_ids ) && in_array( $product_id, $restricted_ids, true ) ) {
+        pam_log( 'TNT product suggestion filter: blocking product ID ' . $product_id );
+        return false; // Return false to remove this suggestion
+    }
+
+    return $suggestion;
+}
+
+/**
+ * Filter FiboSearch TNT taxonomy suggestion (brands, tags)
+ * Hook: dgwt/wcas/tnt/search_results/suggestion/taxonomy
+ */
+function pam_filter_fibo_tnt_taxonomy_suggestion( $suggestion, $taxonomy ) {
+    pam_log( '=== TNT TAXONOMY SUGGESTION FILTER CALLED ===' );
+    pam_log( 'Taxonomy: ' . $taxonomy . ' | Suggestion: ' . print_r( $suggestion, true ) );
+    
+    if ( pam_user_has_full_access() ) {
+        return $suggestion;
+    }
+
+    // Extract term information from suggestion
+    $term_id = 0;
+    if ( isset( $suggestion['term_id'] ) ) {
+        $term_id = (int) $suggestion['term_id'];
+    } elseif ( isset( $suggestion['value'] ) ) {
+        // Sometimes value contains the term ID
+        $term_id = is_numeric( $suggestion['value'] ) ? (int) $suggestion['value'] : 0;
+    }
+
+    if ( ! $term_id ) {
+        pam_log( 'TNT taxonomy filter: could not extract term ID from suggestion' );
+        return $suggestion;
+    }
+
+    $user_keys = pam_get_current_user_keys();
+    if ( ! pam_term_is_allowed( $taxonomy, $term_id, $user_keys ) ) {
+        pam_log( 'TNT taxonomy filter: blocking term ' . $taxonomy . ':' . $term_id );
+        return false; // Return false to remove this suggestion
+    }
 
     return $suggestion;
 }
