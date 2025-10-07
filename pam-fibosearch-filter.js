@@ -1,10 +1,11 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.6.0
+ * Version: 1.6.1
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
  * - Accurate VIEW MORE count recalculation
+ * - Aggressive taxonomy selector targeting
  */
 (function($) {
     'use strict';
@@ -117,14 +118,39 @@
         });
         
         // 2. Filter taxonomy suggestions (brands/tags with "access-" prefix)
-        $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-st, .js-dgwt-wcas-suggestion').each(function() {
+        // Try EVERY possible selector for taxonomy items
+        var taxonomySelectors = [
+            '.dgwt-wcas-suggestion-taxonomy',
+            '.dgwt-wcas-st',
+            '.js-dgwt-wcas-suggestion',
+            '.dgwt-wcas-suggestion',
+            'li[class*="taxonomy"]',
+            'li[class*="brand"]',
+            '.dgwt-wcas-suggestions-wrapp li'
+        ];
+        
+        $(taxonomySelectors.join(', ')).each(function() {
             var $item = $(this);
-            var taxonomySlug = $item.data('taxonomy') || '';
-            var termSlug = $item.data('term') || $item.data('slug') || $item.data('value') || '';
-            var termName = $item.data('name') || '';
+            
+            // Skip if already processed
+            if ($item.data('pam-processed')) {
+                return;
+            }
+            $item.data('pam-processed', true);
+            
+            var taxonomySlug = $item.data('taxonomy') || $item.attr('data-taxonomy') || '';
+            var termSlug = $item.data('term') || $item.data('slug') || $item.data('value') || $item.attr('data-term') || '';
+            var termName = $item.data('name') || $item.attr('data-name') || '';
             
             // Also check text content for "access-" tags and brand names
             var text = $item.text().toLowerCase().trim();
+            
+            console.log('[PAM] Checking taxonomy item:', {
+                text: text,
+                termSlug: termSlug,
+                termName: termName,
+                classes: $item.attr('class')
+            });
             
             // Hide if it's an access-* tag
             if (termSlug.indexOf('access-') === 0 || text.indexOf('access-') !== -1) {
@@ -140,7 +166,7 @@
                 if (text === brand || termSlug === brand || termName.toLowerCase() === brand) {
                     $item.remove(); // REMOVE instead of hide
                     filteredTaxonomies++;
-                    console.log('[PAM] Removing restricted brand:', text || termName);
+                    console.log('[PAM] Removing restricted brand:', text || termName || brand);
                     return;
                 }
             }
