@@ -97,9 +97,12 @@ add_action( 'init', function () {
 
 /**
  * Register the [has_access_tag] shortcode
+ * Runs on 'init' at priority 10 to match WPCode's "Run Everywhere" behavior
  */
-add_shortcode( 'has_access_tag', 'pam_has_access_tag_shortcode' );
-pam_log( 'Shortcode [has_access_tag] registered successfully' );
+add_action( 'init', function () {
+    add_shortcode( 'has_access_tag', 'pam_has_access_tag_shortcode' );
+    pam_log( 'Shortcode [has_access_tag] registered on init hook' );
+}, 10 );
 
 /**
  * Add body class for products with access tags
