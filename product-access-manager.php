@@ -27,7 +27,7 @@ define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 // Debug mode - set to true to enable debug logging
-define( 'PAM_DEBUG', false );
+define( 'PAM_DEBUG', true );
 
 /**
  * Debug logging function
@@ -1307,14 +1307,20 @@ function pam_has_access_tag_shortcode( $atts ) {
         $pid = get_queried_object_id() ?: get_the_ID();
     }
     if ( ! $pid ) {
+        pam_log( 'has_access_tag shortcode: No product ID found' );
         return '0';
     }
+
+    pam_log( 'has_access_tag shortcode: Product ID=' . $pid . ', brands=' . $atts['brands'] );
 
     // Get product tag slugs
     $slugs = wp_get_post_terms( $pid, 'product_tag', array( 'fields' => 'slugs' ) );
     if ( is_wp_error( $slugs ) || empty( $slugs ) ) {
+        pam_log( 'has_access_tag shortcode: No tags found for product ' . $pid );
         return '0';
     }
+
+    pam_log( 'has_access_tag shortcode: Product tags=' . implode( ', ', $slugs ) );
 
     // If no brands provided: match ANY tag starting with "access-"
     if ( trim( $atts['brands'] ) === '' ) {
@@ -1332,11 +1338,13 @@ function pam_has_access_tag_shortcode( $atts ) {
         $needle = $atts['prefix'] . $brand; // e.g., "access-vimergy"
         foreach ( $slugs as $slug ) {
             if ( $slug === $needle || strpos( $slug, $needle . '-' ) === 0 ) {
+                pam_log( 'has_access_tag shortcode: MATCH FOUND - Tag "' . $slug . '" matches "' . $needle . '" - returning 1' );
                 return '1';
             }
         }
     }
 
+    pam_log( 'has_access_tag shortcode: NO MATCH - returning 0' );
     return '0';
 }
 
