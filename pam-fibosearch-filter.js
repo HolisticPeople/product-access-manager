@@ -58,11 +58,18 @@
         
         console.log('[PAM] Filtering FiboSearch results...');
         
-        var filtered = 0;
+        var filteredProducts = 0;
+        var filteredTaxonomies = 0;
         
-        // Find all product suggestions in FiboSearch results
+        // 1. Filter product suggestions
         $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp').each(function() {
             var $item = $(this);
+            
+            // Skip if this is a taxonomy suggestion
+            if ($item.hasClass('dgwt-wcas-suggestion-taxonomy') || $item.closest('.dgwt-wcas-suggestion-taxonomy').length) {
+                return;
+            }
+            
             var productId = null;
             
             // Try to get product ID from data attribute
@@ -79,12 +86,63 @@
             
             if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
                 $item.hide();
-                filtered++;
+                filteredProducts++;
                 console.log('[PAM] Hiding restricted product ID:', productId);
             }
         });
         
-        console.log('[PAM] Filtered ' + filtered + ' products from results');
+        // 2. Filter taxonomy suggestions (brands/tags with "access-" prefix)
+        $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-st').each(function() {
+            var $item = $(this);
+            var taxonomySlug = $item.data('taxonomy') || '';
+            var termSlug = $item.data('term') || $item.data('slug') || '';
+            
+            // Also check text content for "access-" tags
+            var text = $item.text().toLowerCase();
+            
+            // Hide if it's an access-* tag or brand
+            if (termSlug.indexOf('access-') === 0 || text.indexOf('access-') !== -1) {
+                $item.hide();
+                filteredTaxonomies++;
+                console.log('[PAM] Hiding restricted taxonomy:', termSlug || text);
+            }
+        });
+        
+        // 3. Hide "BRANDS" and "TAGS" headers if all items in those sections are hidden
+        $('.dgwt-wcas-suggestion-group').each(function() {
+            var $group = $(this);
+            var $visibleItems = $group.find('.dgwt-wcas-suggestion:visible, .dgwt-wcas-st:visible');
+            
+            if ($visibleItems.length === 0) {
+                $group.hide();
+                console.log('[PAM] Hiding empty group:', $group.find('.dgwt-wcas-suggestion-group-head').text());
+            }
+        });
+        
+        // 4. Update "VIEW MORE" counts
+        $('.dgwt-wcas-view-more').each(function() {
+            var $viewMore = $(this);
+            var originalText = $viewMore.text();
+            var match = originalText.match(/\((\d+)\)/);
+            
+            if (match && filteredProducts > 0) {
+                var originalCount = parseInt(match[1]);
+                var newCount = originalCount - filteredProducts;
+                
+                if (newCount <= 0) {
+                    // Hide the "VIEW MORE" button if no products remain
+                    $viewMore.hide();
+                    console.log('[PAM] Hiding VIEW MORE button - no products remain');
+                } else {
+                    // Update the count
+                    var newText = originalText.replace(/\(\d+\)/, '(' + newCount + ')');
+                    $viewMore.text(newText);
+                    console.log('[PAM] Updated VIEW MORE count: ' + originalCount + ' -> ' + newCount);
+                }
+            }
+        });
+        
+        console.log('[PAM] Filtered ' + filteredProducts + ' products and ' + filteredTaxonomies + ' taxonomies from results');
     }
     
     // Initialize
