@@ -1305,6 +1305,9 @@ function pam_has_access_tag_shortcode( $atts ) {
 
     // Resolve product ID (handles variations too)
     $pid = 0;
+    
+    // Try multiple methods to get product ID
+    // Method 1: Global $product
     if ( function_exists( 'wc_get_product' ) ) {
         global $product;
         if ( $product instanceof WC_Product ) {
@@ -1312,13 +1315,38 @@ function pam_has_access_tag_shortcode( $atts ) {
             if ( $product->is_type( 'variation' ) ) {
                 $pid = $product->get_parent_id();
             }
+            pam_log( 'Got product ID from global $product: ' . $pid );
         }
     }
+    
+    // Method 2: Queried object or current post
     if ( ! $pid ) {
-        $pid = get_queried_object_id() ?: get_the_ID();
+        $pid = get_queried_object_id();
+        if ( $pid ) {
+            pam_log( 'Got product ID from get_queried_object_id(): ' . $pid );
+        }
     }
+    
+    // Method 3: get_the_ID()
     if ( ! $pid ) {
-        pam_log( 'has_access_tag shortcode: No product ID found' );
+        $pid = get_the_ID();
+        if ( $pid ) {
+            pam_log( 'Got product ID from get_the_ID(): ' . $pid );
+        }
+    }
+    
+    // Method 4: Check if we're in the loop
+    if ( ! $pid && in_the_loop() ) {
+        global $post;
+        if ( $post ) {
+            $pid = $post->ID;
+            pam_log( 'Got product ID from global $post in loop: ' . $pid );
+        }
+    }
+    
+    if ( ! $pid ) {
+        pam_log( 'has_access_tag shortcode: No product ID found - tried all methods' );
+        pam_log( 'Context: is_product()=' . (is_product() ? 'yes' : 'no') . ', in_the_loop()=' . (in_the_loop() ? 'yes' : 'no') );
         return '0';
     }
 
