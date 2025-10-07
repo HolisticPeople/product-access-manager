@@ -1,10 +1,10 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.6.1
+ * Version: 1.7.0
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
- * - Accurate VIEW MORE count recalculation
+ * - Remove VIEW MORE when filtering (count unreliable)
  * - Aggressive taxonomy selector targeting
  */
 (function($) {
@@ -183,35 +183,17 @@
             }
         });
         
-        // 4. Update "VIEW MORE" counts by recounting visible products
-        $('.dgwt-wcas-view-more').each(function() {
-            var $viewMore = $(this);
-            
-            // Count how many products are actually remaining in the dropdown
-            var visibleProductsInDropdown = $('.dgwt-wcas-suggestion-product:visible, .dgwt-wcas-sp:visible').length;
-            
-            // The "VIEW MORE" count should be: total results - visible in dropdown
-            // Since we filtered some products, we need to recalculate
-            var originalText = $viewMore.text();
-            var match = originalText.match(/\((\d+)\)/);
-            
-            if (match) {
-                var originalTotalResults = parseInt(match[1]) + visibleProductsInDropdown;
-                var newTotalResults = originalTotalResults - filteredProducts;
-                var newViewMoreCount = newTotalResults - visibleProductsInDropdown;
-                
-                if (newViewMoreCount <= 0) {
-                    // Hide the "VIEW MORE" button if no more products exist
-                    $viewMore.remove();
-                    console.log('[PAM] Removing VIEW MORE button - no products remain');
-                } else {
-                    // Update the count
-                    var newText = originalText.replace(/\(\d+\)/, '(' + newViewMoreCount + ')');
-                    $viewMore.text(newText);
-                    console.log('[PAM] Updated VIEW MORE count: (' + match[1] + ') -> (' + newViewMoreCount + ')');
-                }
-            }
-        });
+        // 4. Remove "VIEW MORE" button if we filtered any products
+        // We can't accurately recalculate the count since FiboSearch runs in SHORTINIT mode
+        // and doesn't know about our restrictions
+        if (filteredProducts > 0 || filteredTaxonomies > 0) {
+            $('.dgwt-wcas-view-more').each(function() {
+                var $viewMore = $(this);
+                var originalText = $viewMore.text();
+                console.log('[PAM] Removing VIEW MORE button - count unreliable after filtering:', originalText);
+                $viewMore.remove();
+            });
+        }
         
         console.log('[PAM] Filtered ' + filteredProducts + ' products and ' + filteredTaxonomies + ' taxonomies from results');
     }
