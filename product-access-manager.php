@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.3.0
+ * Version: 1.3.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.3.0' );
+define( 'PAM_VERSION', '1.3.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -380,110 +380,26 @@ function pam_enqueue_fibo_filter_script() {
         return;
     }
     
-    // Create inline JavaScript for FiboSearch filtering
-    wp_enqueue_script( 'jquery' );
+    // Enqueue external JavaScript file
+    wp_enqueue_script(
+        'pam-fibosearch-filter',
+        plugins_url( 'pam-fibosearch-filter.js', PAM_PLUGIN_FILE ),
+        array( 'jquery' ),
+        PAM_VERSION,
+        true // Load in footer
+    );
     
-    $inline_script = "
-    (function($) {
-        'use strict';
-        
-        var pamRestrictedProducts = null;
-        var pamIsLoading = false;
-        
-        // Fetch restricted products from server
-        function pamFetchRestrictedProducts() {
-            if (pamIsLoading || pamRestrictedProducts !== null) {
-                return;
-            }
-            
-            pamIsLoading = true;
-            
-            $.ajax({
-                url: '" . admin_url( 'admin-ajax.php' ) . "',
-                type: 'POST',
-                data: {
-                    action: 'pam_get_restricted_products'
-                },
-                success: function(response) {
-                    if (response.success) {
-                        pamRestrictedProducts = response.data.restricted_ids || [];
-                        console.log('[PAM] Loaded ' + pamRestrictedProducts.length + ' restricted product IDs');
-                    }
-                    pamIsLoading = false;
-                },
-                error: function() {
-                    pamRestrictedProducts = [];
-                    pamIsLoading = false;
-                }
-            });
-        }
-        
-        // Filter FiboSearch results
-        function pamFilterFiboResults() {
-            if (pamRestrictedProducts === null) {
-                return;
-            }
-            
-            // Find all product suggestions in FiboSearch results
-            $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion').each(function() {
-                var \$item = $(this);
-                var productId = null;
-                
-                // Try to get product ID from data attribute
-                productId = \$item.data('post-id') || \$item.data('product-id') || \$item.attr('data-post-id') || \$item.attr('data-product-id');
-                
-                // If no data attribute, try to extract from URL
-                if (!productId) {
-                    var url = \$item.find('a').attr('href') || '';
-                    var match = url.match(/[?&]p=(\\d+)|product\\/(\\d+)/);
-                    if (match) {
-                        productId = parseInt(match[1] || match[2]);
-                    }
-                }
-                
-                if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
-                    \$item.hide();
-                    console.log('[PAM] Hiding restricted product: ' + productId);
-                }
-            });
-        }
-        
-        // Initialize
-        $(document).ready(function() {
-            // Fetch restricted products immediately
-            pamFetchRestrictedProducts();
-            
-            // Watch for FiboSearch results appearing
-            var observer = new MutationObserver(function(mutations) {
-                mutations.forEach(function(mutation) {
-                    if (mutation.addedNodes.length) {
-                        pamFilterFiboResults();
-                    }
-                });
-            });
-            
-            // Observe the search results container
-            var searchContainer = document.querySelector('.dgwt-wcas-suggestions-wrapp, .dgwt-wcas-search-wrapp');
-            if (searchContainer) {
-                observer.observe(searchContainer, {
-                    childList: true,
-                    subtree: true
-                });
-            }
-            
-            // Also filter after AJAX complete (backup)
-            $(document).ajaxComplete(function(event, xhr, settings) {
-                if (settings.url && settings.url.indexOf('dgwt_wcas') !== -1) {
-                    setTimeout(pamFilterFiboResults, 100);
-                }
-            });
-        });
-    })(jQuery);
-    ";
+    // Localize script with AJAX URL
+    wp_localize_script(
+        'pam-fibosearch-filter',
+        'pamData',
+        array(
+            'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+            'version'  => PAM_VERSION,
+        )
+    );
     
-    wp_add_inline_script( 'jquery', $inline_script );
-    
-    pam_log( 'FiboSearch filter script enqueued' );
+    pam_log( 'FiboSearch filter script enqueued (external file)' );
 }
 
 /**
