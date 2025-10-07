@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.8
+ * Version: 1.1.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,12 +22,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.9' );
+define( 'PAM_VERSION', '1.1.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
-
-// NOTE: DGWT_WCAS_ALTERNATIVE_SEARCH_ENDPOINT_ENABLED is defined in wp-config.php
-// This forces FiboSearch to load full WordPress (not SHORTINIT) so our filters work
 
 /**
  * Debug logging function
@@ -53,26 +50,16 @@ if ( ! function_exists( 'pam_log' ) ) {
 add_action( 'plugins_loaded', function () {
     pam_log( 'Plugins loaded - registering filters for user ' . ( is_user_logged_in() ? get_current_user_id() : 'guest' ) );
     
-    // FiboSearch integration (TNT Search Engine - v1.31+)
-    // Register these FIRST, before WooCommerce checks, so AJAX works
-    // Filter product IDs early (most efficient - before full products loaded)
-    add_filter( 'dgwt/wcas/tnt/search_results/ids', 'pam_filter_fibo_tnt_product_ids', 10, 2 );
-    pam_log( 'Registered filter: dgwt/wcas/tnt/search_results/ids' );
-    // Filter full product objects (backup if IDs filter doesn't catch everything)
-    add_filter( 'dgwt/wcas/tnt/search_results/products', 'pam_filter_fibo_tnt_products', 10, 3 );
-    // Filter individual suggestions (dropdown results)
-    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_tnt_product_suggestion', 10, 2 );
-    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_tnt_taxonomy_suggestion', 10, 2 );
-    // Filter final output (catch-all) - run early so other filters can still modify
-    add_filter( 'dgwt/wcas/tnt/search_results/output', 'pam_filter_fibo_tnt_output', 5, 1 );
-    pam_log( 'Registered filter: dgwt/wcas/tnt/search_results/output' );
+    // FiboSearch integration - Filter during INDEXING (not search)
+    // This prevents restricted products from being indexed at all
+    add_filter( 'dgwt/wcas/indexer/searchable/post_ids', 'pam_filter_fibo_indexable_products', 10, 1 );
+    add_filter( 'dgwt/wcas/indexer/readable/post_ids', 'pam_filter_fibo_indexable_products', 10, 1 );
+    add_filter( 'dgwt/wcas/tnt/indexer/product/should_index', 'pam_should_index_product', 10, 2 );
     
-    // TEST: Add a simple inline filter to see if THIS gets called
-    add_filter( 'dgwt/wcas/tnt/search_results/output', function( $output ) {
-        error_log( '[PAM v' . ( defined('PAM_VERSION') ? PAM_VERSION : 'unknown' ) . '] === INLINE TNT OUTPUT FILTER CALLED ===' );
-        return $output;
-    }, 1, 1 );
-    pam_log( 'Registered INLINE test filter for dgwt/wcas/tnt/search_results/output' );
+    // Filter taxonomy terms from being indexed
+    add_filter( 'dgwt/wcas/tnt/indexer/taxonomy/should_index', 'pam_should_index_term', 10, 3 );
+    
+    pam_log( 'Registered FiboSearch indexer filters' );
     
     // Legacy FiboSearch hooks (for older versions)
     add_filter( 'dgwt/wcas/products', 'pam_filter_fibo_products', 10, 2 );
@@ -386,6 +373,154 @@ function pam_filter_fibo_single( $suggestion, $context ) {
     pam_log( 'FiboSearch single filter: keep non-product suggestion.' );
 
     return $suggestion;
+}
+
+// ============================================================================
+// FIBOSEARCH INDEXER INTEGRATION (Exclude from Index)
+// ============================================================================
+
+/**
+ * Filter products that should be indexed by FiboSearch
+ * Excludes ALL restricted products from the index (not user-specific)
+ * 
+ * @param array $product_ids Array of product IDs to index
+ * @return array Filtered array
+ */
+function pam_filter_fibo_indexable_products( $product_ids ) {
+    pam_log( 'FiboSearch indexer: filtering ' . count( $product_ids ) . ' products' );
+    
+    // Get ALL products with access-* tags (these are restricted)
+    $restricted_slugs = pam_get_all_access_tag_slugs();
+    
+    if ( empty( $restricted_slugs ) ) {
+        pam_log( 'FiboSearch indexer: no restricted tags found' );
+        return $product_ids;
+    }
+    
+    // Find products with these tags
+    pam_is_internal_lookup( true );
+    
+    $restricted_query = new WP_Query(
+        array(
+            'post_type'        => 'product',
+            'post_status'      => 'publish',
+            'fields'           => 'ids',
+            'nopaging'         => true,
+            'suppress_filters' => true,
+            'tax_query'        => array(
+                array(
+                    'taxonomy' => 'product_tag',
+                    'field'    => 'slug',
+                    'terms'    => $restricted_slugs,
+                    'operator' => 'IN',
+                ),
+            ),
+        )
+    );
+    
+    pam_is_internal_lookup( false );
+    
+    $restricted_ids = array_map( 'intval', (array) $restricted_query->posts );
+    
+    if ( empty( $restricted_ids ) ) {
+        pam_log( 'FiboSearch indexer: no restricted products found' );
+        return $product_ids;
+    }
+    
+    // Remove restricted products from indexable list
+    $filtered = array_diff( $product_ids, $restricted_ids );
+    
+    pam_log( 'FiboSearch indexer: excluded ' . count( $restricted_ids ) . ' restricted products from index' );
+    
+    return array_values( $filtered );
+}
+
+/**
+ * Should this product be indexed?
+ * 
+ * @param bool $should_index Whether to index
+ * @param int $product_id Product ID
+ * @return bool
+ */
+function pam_should_index_product( $should_index, $product_id ) {
+    if ( ! $should_index ) {
+        return false;
+    }
+    
+    // Check if product has access-* tags
+    $tags = wp_get_post_terms( $product_id, 'product_tag', array( 'fields' => 'slugs' ) );
+    
+    if ( is_wp_error( $tags ) || empty( $tags ) ) {
+        return $should_index;
+    }
+    
+    // If product has ANY access-* tag, don't index it
+    foreach ( $tags as $slug ) {
+        if ( 0 === strpos( $slug, 'access-' ) ) {
+            pam_log( 'FiboSearch indexer: skipping product ' . $product_id . ' (has access tag: ' . $slug . ')' );
+            return false;
+        }
+    }
+    
+    return $should_index;
+}
+
+/**
+ * Should this term be indexed?
+ * 
+ * @param bool $should_index Whether to index
+ * @param WP_Term $term Term object
+ * @param string $taxonomy Taxonomy name
+ * @return bool
+ */
+function pam_should_index_term( $should_index, $term, $taxonomy ) {
+    if ( ! $should_index ) {
+        return false;
+    }
+    
+    // Don't index access-* tags or brands
+    if ( isset( $term->slug ) && 0 === strpos( $term->slug, 'access-' ) ) {
+        pam_log( 'FiboSearch indexer: skipping term ' . $term->slug . ' (' . $taxonomy . ')' );
+        return false;
+    }
+    
+    return $should_index;
+}
+
+/**
+ * Get all access-* tag slugs (not user-specific)
+ * 
+ * @return array
+ */
+function pam_get_all_access_tag_slugs() {
+    static $cache = null;
+    
+    if ( null !== $cache ) {
+        return $cache;
+    }
+    
+    $terms = get_terms(
+        array(
+            'taxonomy'   => 'product_tag',
+            'hide_empty' => false,
+            'fields'     => 'slugs',
+        )
+    );
+    
+    if ( is_wp_error( $terms ) ) {
+        $cache = array();
+        return $cache;
+    }
+    
+    $access_tags = array();
+    foreach ( $terms as $slug ) {
+        if ( 0 === strpos( $slug, 'access-' ) ) {
+            $access_tags[] = $slug;
+        }
+    }
+    
+    $cache = $access_tags;
+    return $cache;
 }
 
 // ============================================================================
