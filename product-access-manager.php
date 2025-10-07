@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.4
+ * Version: 1.0.5
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.4' );
+define( 'PAM_VERSION', '1.0.5' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -44,6 +44,31 @@ if ( ! function_exists( 'pam_log' ) ) {
 
 /**
  * Initialize the plugin hooks
+ * Runs on 'plugins_loaded' (EARLY) to ensure filters are registered before AJAX
+ */
+add_action( 'plugins_loaded', function () {
+    pam_log( 'Plugins loaded - registering filters for user ' . ( is_user_logged_in() ? get_current_user_id() : 'guest' ) );
+    
+    // FiboSearch integration (TNT Search Engine - v1.31+)
+    // Register these FIRST, before WooCommerce checks, so AJAX works
+    // Filter product IDs early (most efficient - before full products loaded)
+    add_filter( 'dgwt/wcas/tnt/search_results/ids', 'pam_filter_fibo_tnt_product_ids', 10, 2 );
+    // Filter full product objects (backup if IDs filter doesn't catch everything)
+    add_filter( 'dgwt/wcas/tnt/search_results/products', 'pam_filter_fibo_tnt_products', 10, 3 );
+    // Filter individual suggestions (dropdown results)
+    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_tnt_product_suggestion', 10, 2 );
+    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_tnt_taxonomy_suggestion', 10, 2 );
+    // Filter final output (catch-all) - run early so other filters can still modify
+    add_filter( 'dgwt/wcas/tnt/search_results/output', 'pam_filter_fibo_tnt_output', 5, 1 );
+    
+    // Legacy FiboSearch hooks (for older versions)
+    add_filter( 'dgwt/wcas/products', 'pam_filter_fibo_products', 10, 2 );
+    add_filter( 'dgwt/wcas/suggestions', 'pam_filter_fibo_products', 10, 2 );
+    add_filter( 'dgwt/wcas/suggestion', 'pam_filter_fibo_single', 10, 2 );
+}, 5 ); // Priority 5 - run early
+
+/**
+ * Initialize WooCommerce-dependent hooks
  * Runs on 'init' to ensure WooCommerce is loaded
  */
 add_action( 'init', function () {
@@ -64,22 +89,6 @@ add_action( 'init', function () {
     // Query filters
     add_action( 'pre_get_posts', 'pam_filter_query' );
     add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_product_query', 10, 2 );
-    
-    // FiboSearch integration (TNT Search Engine - v1.31+)
-    // Filter product IDs early (most efficient - before full products loaded)
-    add_filter( 'dgwt/wcas/tnt/search_results/ids', 'pam_filter_fibo_tnt_product_ids', 10, 2 );
-    // Filter full product objects (backup if IDs filter doesn't catch everything)
-    add_filter( 'dgwt/wcas/tnt/search_results/products', 'pam_filter_fibo_tnt_products', 10, 3 );
-    // Filter individual suggestions (dropdown results)
-    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_tnt_product_suggestion', 10, 2 );
-    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_tnt_taxonomy_suggestion', 10, 2 );
-    // Filter final output (catch-all)
-    add_filter( 'dgwt/wcas/tnt/search_results/output', 'pam_filter_fibo_tnt_output', 10, 1 );
-    
-    // Legacy FiboSearch hooks (for older versions)
-    add_filter( 'dgwt/wcas/products', 'pam_filter_fibo_products', 10, 2 );
-    add_filter( 'dgwt/wcas/suggestions', 'pam_filter_fibo_products', 10, 2 );
-    add_filter( 'dgwt/wcas/suggestion', 'pam_filter_fibo_single', 10, 2 );
 } );
 
 /**
