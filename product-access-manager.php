@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.4.2
+ * Version: 1.5.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.4.2' );
+define( 'PAM_VERSION', '1.5.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -56,6 +56,9 @@ add_action( 'plugins_loaded', function () {
     
     // Filter taxonomy (brand/tag) suggestions
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_taxonomy_suggestion', 10, 2 );
+    
+    // Filter final output (catch all - modifies JSON before sending to browser)
+    add_filter( 'dgwt/wcas/tnt/search_results/output', 'pam_filter_fibo_final_output', 999, 1 );
     
     // Client-side filtering as backup
     add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
@@ -452,6 +455,78 @@ function pam_filter_fibo_taxonomy_suggestion( $output_data, $taxonomy ) {
     }
     
     return $output_data;
+}
+
+/**
+ * Filter FiboSearch final output - remove restricted products/brands from JSON
+ * This is the last chance to filter before JSON is sent to browser
+ * 
+ * @param array $output The complete search results array
+ * @return array Modified output
+ */
+function pam_filter_fibo_final_output( $output ) {
+    pam_log( 'FiboSearch Final Output Filter: Processing results' );
+    
+    if ( pam_user_has_full_access() ) {
+        return $output;
+    }
+    
+    $access_tag_slugs = pam_get_all_access_tag_slugs();
+    if ( empty( $access_tag_slugs ) ) {
+        return $output;
+    }
+    
+    // Extract brand names from access tags
+    $restricted_brands = array();
+    foreach ( $access_tag_slugs as $access_slug ) {
+        if ( preg_match( '/^access-([^-]+)/', $access_slug, $matches ) ) {
+            $restricted_brands[] = strtolower( $matches[1] );
+        }
+    }
+    
+    pam_log( 'FiboSearch Final: Restricted brands: ' . implode( ', ', $restricted_brands ) );
+    
+    // Filter suggestions
+    if ( isset( $output['suggestions'] ) && is_array( $output['suggestions'] ) ) {
+        $filtered_suggestions = array();
+        $removed_count = 0;
+        
+        foreach ( $output['suggestions'] as $suggestion ) {
+            $should_exclude = false;
+            
+            // Check if this is a taxonomy (brand/tag) suggestion
+            if ( isset( $suggestion['type'] ) && $suggestion['type'] === 'taxonomy' ) {
+                $term_slug = isset( $suggestion['value'] ) ? strtolower( $suggestion['value'] ) : '';
+                $term_name = isset( $suggestion['name'] ) ? strtolower( $suggestion['name'] ) : '';
+                
+                // Exclude access-* tags
+                if ( 0 === strpos( $term_slug, 'access-' ) ) {
+                    $should_exclude = true;
+                    pam_log( 'FiboSearch Final: Excluding access tag: ' . $term_slug );
+                }
+                
+                // Exclude restricted brands
+                foreach ( $restricted_brands as $brand ) {
+                    if ( $term_slug === $brand || $term_name === $brand ) {
+                        $should_exclude = true;
+                        pam_log( 'FiboSearch Final: Excluding brand: ' . $term_name );
+                        break;
+                    }
+                }
+            }
+            
+            if ( ! $should_exclude ) {
+                $filtered_suggestions[] = $suggestion;
+            } else {
+                $removed_count++;
+            }
+        }
+        
+        $output['suggestions'] = $filtered_suggestions;
+        pam_log( 'FiboSearch Final: Removed ' . $removed_count . ' taxonomy suggestions' );
+    }
+    
+    return $output;
 }
 
 /**
