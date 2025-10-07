@@ -105,6 +105,18 @@ add_action( 'init', function () {
 }, 10 );
 
 /**
+ * TEST: Manually test shortcode execution on product pages
+ * This will prove if the shortcode function works at all
+ */
+add_action( 'wp', function () {
+    if ( is_product() ) {
+        pam_log( 'Testing manual do_shortcode on product page...' );
+        $result = do_shortcode( '[has_access_tag brands="vimergy"]' );
+        pam_log( 'Manual do_shortcode result: ' . $result );
+    }
+}, 20 ); // Run after wp_head is set up
+
+/**
  * Add body class for products with access tags
  * This allows Elementor conditions to check for CSS classes
  */
