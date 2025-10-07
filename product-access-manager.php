@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.6
+ * Version: 1.0.7
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.6' );
+define( 'PAM_VERSION', '1.0.7' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -54,6 +54,7 @@ add_action( 'plugins_loaded', function () {
     // Register these FIRST, before WooCommerce checks, so AJAX works
     // Filter product IDs early (most efficient - before full products loaded)
     add_filter( 'dgwt/wcas/tnt/search_results/ids', 'pam_filter_fibo_tnt_product_ids', 10, 2 );
+    pam_log( 'Registered filter: dgwt/wcas/tnt/search_results/ids' );
     // Filter full product objects (backup if IDs filter doesn't catch everything)
     add_filter( 'dgwt/wcas/tnt/search_results/products', 'pam_filter_fibo_tnt_products', 10, 3 );
     // Filter individual suggestions (dropdown results)
