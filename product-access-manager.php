@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.3.1
+ * Version: 1.3.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.3.1' );
+define( 'PAM_VERSION', '1.3.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -406,6 +406,11 @@ function pam_enqueue_fibo_filter_script() {
  * AJAX endpoint to get restricted product IDs for current user
  */
 function pam_ajax_get_restricted_products() {
+    // Clean output buffer to prevent PHP notices/warnings from breaking JSON
+    if ( ob_get_length() ) {
+        ob_clean();
+    }
+    
     // Get restricted product IDs for this user
     $restricted_ids = pam_get_restricted_product_ids();
     
