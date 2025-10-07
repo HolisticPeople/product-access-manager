@@ -22,9 +22,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.8' );
+define( 'PAM_VERSION', '1.0.9' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+
+// NOTE: DGWT_WCAS_ALTERNATIVE_SEARCH_ENDPOINT_ENABLED is defined in wp-config.php
+// This forces FiboSearch to load full WordPress (not SHORTINIT) so our filters work
 
 /**
  * Debug logging function
