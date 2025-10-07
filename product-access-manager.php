@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.3
+ * Version: 1.0.4
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.3' );
+define( 'PAM_VERSION', '1.0.4' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -66,9 +66,15 @@ add_action( 'init', function () {
     add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_product_query', 10, 2 );
     
     // FiboSearch integration (TNT Search Engine - v1.31+)
+    // Filter product IDs early (most efficient - before full products loaded)
+    add_filter( 'dgwt/wcas/tnt/search_results/ids', 'pam_filter_fibo_tnt_product_ids', 10, 2 );
+    // Filter full product objects (backup if IDs filter doesn't catch everything)
     add_filter( 'dgwt/wcas/tnt/search_results/products', 'pam_filter_fibo_tnt_products', 10, 3 );
+    // Filter individual suggestions (dropdown results)
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_tnt_product_suggestion', 10, 2 );
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_tnt_taxonomy_suggestion', 10, 2 );
+    // Filter final output (catch-all)
+    add_filter( 'dgwt/wcas/tnt/search_results/output', 'pam_filter_fibo_tnt_output', 10, 1 );
     
     // Legacy FiboSearch hooks (for older versions)
     add_filter( 'dgwt/wcas/products', 'pam_filter_fibo_products', 10, 2 );
@@ -365,6 +371,35 @@ function pam_filter_fibo_single( $suggestion, $context ) {
 // ============================================================================
 
 /**
+ * Filter FiboSearch TNT product IDs (EARLY - Most Efficient)
+ * Hook: dgwt/wcas/tnt/search_results/ids
+ * This runs BEFORE full product objects are loaded
+ */
+function pam_filter_fibo_tnt_product_ids( $ids, $phrase ) {
+    pam_log( '=== TNT PRODUCT IDS FILTER CALLED ===' );
+    pam_log( 'TNT IDs count: ' . count( $ids ) . ' | phrase: ' . $phrase );
+    
+    if ( pam_user_has_full_access() ) {
+        pam_log( 'TNT IDs filter: user has full access' );
+        return $ids;
+    }
+
+    $restricted_ids = pam_get_restricted_product_ids();
+    if ( empty( $restricted_ids ) ) {
+        pam_log( 'TNT IDs filter: no restricted products' );
+        return $ids;
+    }
+
+    // Remove restricted IDs from the results
+    $filtered = array_diff( $ids, $restricted_ids );
+    
+    pam_log( 'TNT IDs filter: removed ' . ( count( $ids ) - count( $filtered ) ) . ' restricted IDs' );
+    pam_log( 'TNT IDs filter: kept ' . count( $filtered ) . ' of ' . count( $ids ) . ' IDs' );
+    
+    return array_values( $filtered ); // Re-index array
+}
+
+/**
  * Filter FiboSearch TNT products array
  * Hook: dgwt/wcas/tnt/search_results/products
  */
@@ -457,6 +492,58 @@ function pam_filter_fibo_tnt_taxonomy_suggestion( $suggestion, $taxonomy ) {
     }
 
     return $suggestion;
+}
+
+/**
+ * Filter FiboSearch TNT final output (catch-all)
+ * Hook: dgwt/wcas/tnt/search_results/output
+ * This is the final output before sending to browser
+ */
+function pam_filter_fibo_tnt_output( $output ) {
+    pam_log( '=== TNT OUTPUT FILTER CALLED ===' );
+    pam_log( 'Output structure: ' . print_r( array_keys( $output ), true ) );
+    
+    if ( pam_user_has_full_access() ) {
+        return $output;
+    }
+
+    $restricted_ids = pam_get_restricted_product_ids();
+    $user_keys = pam_get_current_user_keys();
+    
+    // Filter suggestions array if it exists
+    if ( isset( $output['suggestions'] ) && is_array( $output['suggestions'] ) ) {
+        $original_count = count( $output['suggestions'] );
+        $filtered = array();
+        
+        foreach ( $output['suggestions'] as $suggestion ) {
+            // Skip restricted products
+            if ( isset( $suggestion['type'] ) && $suggestion['type'] === 'product' ) {
+                $id = isset( $suggestion['post_id'] ) ? (int) $suggestion['post_id'] : 0;
+                if ( $id && ! empty( $restricted_ids ) && in_array( $id, $restricted_ids, true ) ) {
+                    pam_log( 'TNT output filter: removing restricted product ID ' . $id );
+                    continue;
+                }
+            }
+            
+            // Skip restricted taxonomies (brands, tags)
+            if ( isset( $suggestion['type'] ) && in_array( $suggestion['type'], array( 'taxonomy', 'product_tag', 'brand' ), true ) ) {
+                $term_id = isset( $suggestion['term_id'] ) ? (int) $suggestion['term_id'] : 0;
+                $taxonomy = isset( $suggestion['taxonomy'] ) ? $suggestion['taxonomy'] : '';
+                
+                if ( $term_id && $taxonomy && ! pam_term_is_allowed( $taxonomy, $term_id, $user_keys ) ) {
+                    pam_log( 'TNT output filter: removing restricted term ' . $taxonomy . ':' . $term_id );
+                    continue;
+                }
+            }
+            
+            $filtered[] = $suggestion;
+        }
+        
+        $output['suggestions'] = $filtered;
+        pam_log( 'TNT output filter: kept ' . count( $filtered ) . ' of ' . $original_count . ' suggestions' );
+    }
+    
+    return $output;
 }
 
 // ============================================================================
