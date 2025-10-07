@@ -1,10 +1,10 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.7.2
+ * Version: 1.7.3
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
- * - Smart VIEW MORE count adjustment (FIXED selector)
+ * - Smart VIEW MORE count - subtract TOTAL restricted products
  * - Aggressive taxonomy selector targeting
  */
 (function($) {
@@ -183,8 +183,9 @@
             }
         });
         
-        // 4. Update or remove "VIEW MORE" button based on filtered products count
-        if (filteredProducts > 0) {
+        // 4. Update or remove "VIEW MORE" button based on TOTAL restricted products count
+        // Use pamRestrictedProducts.length (total restricted) not filteredProducts (only visible ones removed)
+        if (pamRestrictedProducts && pamRestrictedProducts.length > 0) {
             $('.dgwt-wcas-suggestion-more, .js-dgwt-wcas-suggestion-more').each(function() {
                 var $viewMore = $(this);
                 var originalText = $viewMore.text();
@@ -196,9 +197,10 @@
                 
                 if (match) {
                     var originalCount = parseInt(match[1]);
-                    var newCount = originalCount - filteredProducts;
+                    var totalRestrictedProducts = pamRestrictedProducts.length;
+                    var newCount = originalCount - totalRestrictedProducts;
                     
-                    console.log('[PAM] VIEW MORE calculation: ' + originalCount + ' - ' + filteredProducts + ' = ' + newCount);
+                    console.log('[PAM] VIEW MORE calculation: ' + originalCount + ' (server count) - ' + totalRestrictedProducts + ' (total restricted) = ' + newCount);
                     
                     if (newCount <= 0) {
                         // Remove the button if no more products
