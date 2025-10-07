@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.2.1
+ * Version: 1.3.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.2.1' );
+define( 'PAM_VERSION', '1.3.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -50,11 +50,13 @@ if ( ! function_exists( 'pam_log' ) ) {
 add_action( 'plugins_loaded', function () {
     pam_log( 'Plugins loaded - registering filters for user ' . ( is_user_logged_in() ? get_current_user_id() : 'guest' ) );
     
-    // FiboSearch integration - Filter SQL query during indexing
-    // Exclude products with access-* tags from being indexed at all
-    add_filter( 'dgwt/wcas/indexer/post_source_query/query', 'pam_fibo_filter_index_query', 10, 3 );
+    // FiboSearch integration - Client-side JavaScript filtering
+    // Since FiboSearch uses SHORTINIT mode, we filter results in the browser
+    add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
+    add_action( 'wp_ajax_pam_get_restricted_products', 'pam_ajax_get_restricted_products' );
+    add_action( 'wp_ajax_nopriv_pam_get_restricted_products', 'pam_ajax_get_restricted_products' );
     
-    pam_log( 'Registered FiboSearch SQL query filter for indexing' );
+    pam_log( 'Registered FiboSearch client-side filtering' );
 }, 5 ); // Priority 5 - run early
 
 /**
@@ -370,72 +372,133 @@ function pam_filter_fibo_single( $suggestion, $context ) {
 // ============================================================================
 
 /**
- * Filter FiboSearch indexing SQL query to exclude products with access-* tags
- * 
- * @param string $sql The SQL query
- * @param object $query_obj The query object
- * @param bool $only_ids Whether only IDs are being queried
- * @return string Modified SQL query
+ * Enqueue FiboSearch filter script
  */
-function pam_fibo_filter_index_query( $sql, $query_obj, $only_ids ) {
-    global $wpdb;
-    
-    pam_log( '=== FIBOSEARCH SQL FILTER CALLED ===' );
-    pam_log( 'FiboSearch SQL filter: only_ids=' . ( $only_ids ? 'yes' : 'no' ) );
-    
-    // Get all access-* tag term IDs
-    $access_tag_slugs = pam_get_all_access_tag_slugs();
-    
-    if ( empty( $access_tag_slugs ) ) {
-        pam_log( 'FiboSearch SQL filter: no access tags found' );
-        return $sql;
+function pam_enqueue_fibo_filter_script() {
+    // Only enqueue on frontend
+    if ( is_admin() ) {
+        return;
     }
     
-    pam_log( 'FiboSearch SQL filter: found ' . count( $access_tag_slugs ) . ' access tags: ' . implode( ', ', $access_tag_slugs ) );
+    // Create inline JavaScript for FiboSearch filtering
+    wp_enqueue_script( 'jquery' );
     
-    // Get term IDs for these slugs
-    $term_ids = array();
-    foreach ( $access_tag_slugs as $slug ) {
-        $term = get_term_by( 'slug', $slug, 'product_tag' );
-        if ( $term && ! is_wp_error( $term ) ) {
-            $term_ids[] = (int) $term->term_id;
+    $inline_script = "
+    (function($) {
+        'use strict';
+        
+        var pamRestrictedProducts = null;
+        var pamIsLoading = false;
+        
+        // Fetch restricted products from server
+        function pamFetchRestrictedProducts() {
+            if (pamIsLoading || pamRestrictedProducts !== null) {
+                return;
+            }
+            
+            pamIsLoading = true;
+            
+            $.ajax({
+                url: '" . admin_url( 'admin-ajax.php' ) . "',
+                type: 'POST',
+                data: {
+                    action: 'pam_get_restricted_products'
+                },
+                success: function(response) {
+                    if (response.success) {
+                        pamRestrictedProducts = response.data.restricted_ids || [];
+                        console.log('[PAM] Loaded ' + pamRestrictedProducts.length + ' restricted product IDs');
+                    }
+                    pamIsLoading = false;
+                },
+                error: function() {
+                    pamRestrictedProducts = [];
+                    pamIsLoading = false;
+                }
+            });
         }
-    }
-    
-    if ( empty( $term_ids ) ) {
-        pam_log( 'FiboSearch SQL filter: no term IDs found' );
-        return $sql;
-    }
-    
-    pam_log( 'FiboSearch SQL filter: excluding term IDs: ' . implode( ', ', $term_ids ) );
-    
-    // Add WHERE clause to exclude products with these tags
-    // The SQL should have a FROM {$wpdb->posts} clause we can use
-    $term_ids_string = implode( ',', $term_ids );
-    
-    $exclude_clause = "
-        AND p.ID NOT IN (
-            SELECT object_id 
-            FROM {$wpdb->term_relationships} 
-            WHERE term_taxonomy_id IN ($term_ids_string)
-        )
+        
+        // Filter FiboSearch results
+        function pamFilterFiboResults() {
+            if (pamRestrictedProducts === null) {
+                return;
+            }
+            
+            // Find all product suggestions in FiboSearch results
+            $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion').each(function() {
+                var \$item = $(this);
+                var productId = null;
+                
+                // Try to get product ID from data attribute
+                productId = \$item.data('post-id') || \$item.data('product-id') || \$item.attr('data-post-id') || \$item.attr('data-product-id');
+                
+                // If no data attribute, try to extract from URL
+                if (!productId) {
+                    var url = \$item.find('a').attr('href') || '';
+                    var match = url.match(/[?&]p=(\\d+)|product\\/(\\d+)/);
+                    if (match) {
+                        productId = parseInt(match[1] || match[2]);
+                    }
+                }
+                
+                if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
+                    \$item.hide();
+                    console.log('[PAM] Hiding restricted product: ' + productId);
+                }
+            });
+        }
+        
+        // Initialize
+        $(document).ready(function() {
+            // Fetch restricted products immediately
+            pamFetchRestrictedProducts();
+            
+            // Watch for FiboSearch results appearing
+            var observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.addedNodes.length) {
+                        pamFilterFiboResults();
+                    }
+                });
+            });
+            
+            // Observe the search results container
+            var searchContainer = document.querySelector('.dgwt-wcas-suggestions-wrapp, .dgwt-wcas-search-wrapp');
+            if (searchContainer) {
+                observer.observe(searchContainer, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+            
+            // Also filter after AJAX complete (backup)
+            $(document).ajaxComplete(function(event, xhr, settings) {
+                if (settings.url && settings.url.indexOf('dgwt_wcas') !== -1) {
+                    setTimeout(pamFilterFiboResults, 100);
+                }
+            });
+        });
+    })(jQuery);
     ";
     
-    // Insert the exclusion clause before the final WHERE or ORDER BY
-    // Look for common SQL patterns
-    if ( stripos( $sql, 'ORDER BY' ) !== false ) {
-        $sql = str_replace( 'ORDER BY', $exclude_clause . ' ORDER BY', $sql );
-        pam_log( 'FiboSearch SQL filter: Added exclusion before ORDER BY' );
-    } elseif ( stripos( $sql, 'LIMIT' ) !== false ) {
-        $sql = str_replace( 'LIMIT', $exclude_clause . ' LIMIT', $sql );
-        pam_log( 'FiboSearch SQL filter: Added exclusion before LIMIT' );
-    } else {
-        // Append to end
-        $sql .= $exclude_clause;
-        pam_log( 'FiboSearch SQL filter: Appended exclusion to end' );
-    }
+    wp_add_inline_script( 'jquery', $inline_script );
     
-    return $sql;
+    pam_log( 'FiboSearch filter script enqueued' );
+}
+
+/**
+ * AJAX endpoint to get restricted product IDs for current user
+ */
+function pam_ajax_get_restricted_products() {
+    // Get restricted product IDs for this user
+    $restricted_ids = pam_get_restricted_product_ids();
+    
+    pam_log( 'AJAX: Returning ' . count( $restricted_ids ) . ' restricted products for user ' . ( is_user_logged_in() ? get_current_user_id() : 'guest' ) );
+    
+    wp_send_json_success( array(
+        'restricted_ids' => array_values( array_map( 'intval', $restricted_ids ) ),
+        'user_id' => is_user_logged_in() ? get_current_user_id() : 0,
+    ) );
 }
 
 /**
