@@ -92,19 +92,39 @@
         });
         
         // 2. Filter taxonomy suggestions (brands/tags with "access-" prefix)
-        $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-st').each(function() {
+        $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-st, .js-dgwt-wcas-suggestion').each(function() {
             var $item = $(this);
             var taxonomySlug = $item.data('taxonomy') || '';
-            var termSlug = $item.data('term') || $item.data('slug') || '';
+            var termSlug = $item.data('term') || $item.data('slug') || $item.data('value') || '';
+            var termName = $item.data('name') || '';
             
-            // Also check text content for "access-" tags
-            var text = $item.text().toLowerCase();
+            // Also check text content for "access-" tags and brand names
+            var text = $item.text().toLowerCase().trim();
             
-            // Hide if it's an access-* tag or brand
+            // Hide if it's an access-* tag
             if (termSlug.indexOf('access-') === 0 || text.indexOf('access-') !== -1) {
                 $item.hide();
                 filteredTaxonomies++;
-                console.log('[PAM] Hiding restricted taxonomy:', termSlug || text);
+                console.log('[PAM] Hiding restricted tag:', termSlug || text);
+                return;
+            }
+            
+            // Extract brand names from access tags (e.g., "access-vimergy-product" -> "vimergy")
+            // Check all current product IDs' tags to find associated brands
+            var restrictedBrands = [];
+            
+            // Simple heuristic: if we have "access-X-product" tags, hide brand "X"
+            // For now, hardcode known patterns - in future this could be made dynamic
+            var brandPatterns = ['vimergy', 'drcoussens']; // Add more as needed
+            
+            for (var i = 0; i < brandPatterns.length; i++) {
+                var brand = brandPatterns[i];
+                if (text === brand || termSlug === brand || termName.toLowerCase() === brand) {
+                    $item.hide();
+                    filteredTaxonomies++;
+                    console.log('[PAM] Hiding restricted brand:', text || termName);
+                    return;
+                }
             }
         });
         
