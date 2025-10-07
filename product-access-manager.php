@@ -27,7 +27,7 @@ define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 // Debug mode - set to true to enable debug logging
-define( 'PAM_DEBUG', true );
+define( 'PAM_DEBUG', false );
 
 /**
  * Debug logging function
@@ -101,20 +101,7 @@ add_action( 'init', function () {
  */
 add_action( 'init', function () {
     add_shortcode( 'has_access_tag', 'pam_has_access_tag_shortcode' );
-    pam_log( 'Shortcode [has_access_tag] registered on init hook' );
 }, 10 );
-
-/**
- * TEST: Manually test shortcode execution on product pages
- * This will prove if the shortcode function works at all
- */
-add_action( 'wp', function () {
-    if ( is_product() ) {
-        pam_log( 'Testing manual do_shortcode on product page...' );
-        $result = do_shortcode( '[has_access_tag brands="vimergy"]' );
-        pam_log( 'Manual do_shortcode result: ' . $result );
-    }
-}, 20 ); // Run after wp_head is set up
 
 /**
  * Add body class for products with access tags
