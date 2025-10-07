@@ -1,10 +1,11 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.8.1
+ * Version: 1.8.2
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
  * - Smart VIEW MORE count - intercept AJAX to count ALL products (visible + VIEW MORE)
+ * - Prevent FOUC (Flash of Unfiltered Content) with opacity transitions
  * - Aggressive taxonomy selector targeting
  */
 (function($) {
@@ -59,11 +60,16 @@
         
         if (pamRestrictedProducts.length === 0) {
             console.log('[PAM] No restricted products to filter');
+            // Show results if no filtering needed
+            $('.dgwt-wcas-suggestions-wrapp').css('opacity', '1');
             return;
         }
         
         console.log('[PAM] Filtering FiboSearch results...');
         console.log('[PAM] Using count from AJAX interceptor: ' + pamRestrictedInCurrentSearch + ' restricted products');
+        
+        // Hide results during filtering to prevent FOUC
+        $('.dgwt-wcas-suggestions-wrapp').css('opacity', '0');
         
         var filteredProducts = 0;
         var filteredTaxonomies = 0;
@@ -220,6 +226,14 @@
         }
         
         console.log('[PAM] Filtered ' + filteredProducts + ' products and ' + filteredTaxonomies + ' taxonomies from results');
+        
+        // Show results after filtering is complete (smooth transition)
+        setTimeout(function() {
+            $('.dgwt-wcas-suggestions-wrapp').css({
+                'opacity': '1',
+                'transition': 'opacity 0.15s ease-in'
+            });
+        }, 50);
     }
     
     // Initialize
@@ -230,7 +244,7 @@
         pamFetchRestrictedProducts();
         
         // Intercept FiboSearch AJAX responses to count ALL products (visible + VIEW MORE)
-        $(document).ajaxSuccess(function(event, xhr, settings) {
+        $(document).ajaxComplete(function(event, xhr, settings) {
             if (settings.url && settings.url.indexOf('dgwt_wcas') !== -1) {
                 try {
                     var response = JSON.parse(xhr.responseText);
