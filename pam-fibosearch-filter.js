@@ -1,6 +1,10 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
+ * Version: 1.6.0
+ * - Dynamic brand detection from access tags
+ * - Remove (not hide) restricted items
+ * - Accurate VIEW MORE count recalculation
  */
 (function($) {
     'use strict';
@@ -61,6 +65,27 @@
         var filteredProducts = 0;
         var filteredTaxonomies = 0;
         
+        // Extract brand names dynamically from access tags
+        var restrictedBrands = [];
+        $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-st, .js-dgwt-wcas-suggestion').each(function() {
+            var $item = $(this);
+            var text = $item.text().toLowerCase().trim();
+            
+            // If this is an access-* tag, extract the brand name
+            if (text.indexOf('access-') === 0) {
+                var match = text.match(/^access-([^-]+)/);
+                if (match && match[1]) {
+                    var brand = match[1];
+                    if (restrictedBrands.indexOf(brand) === -1) {
+                        restrictedBrands.push(brand);
+                        console.log('[PAM] Detected restricted brand from tag:', brand);
+                    }
+                }
+            }
+        });
+        
+        console.log('[PAM] Restricted brands:', restrictedBrands.join(', '));
+        
         // 1. Filter product suggestions
         $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp').each(function() {
             var $item = $(this);
@@ -103,61 +128,61 @@
             
             // Hide if it's an access-* tag
             if (termSlug.indexOf('access-') === 0 || text.indexOf('access-') !== -1) {
-                $item.hide();
+                $item.remove(); // REMOVE instead of hide
                 filteredTaxonomies++;
-                console.log('[PAM] Hiding restricted tag:', termSlug || text);
+                console.log('[PAM] Removing restricted tag:', termSlug || text);
                 return;
             }
             
-            // Extract brand names from access tags (e.g., "access-vimergy-product" -> "vimergy")
-            // Check all current product IDs' tags to find associated brands
-            var restrictedBrands = [];
-            
-            // Simple heuristic: if we have "access-X-product" tags, hide brand "X"
-            // For now, hardcode known patterns - in future this could be made dynamic
-            var brandPatterns = ['vimergy', 'drcoussens']; // Add more as needed
-            
-            for (var i = 0; i < brandPatterns.length; i++) {
-                var brand = brandPatterns[i];
+            // Check against dynamically detected restricted brands
+            for (var i = 0; i < restrictedBrands.length; i++) {
+                var brand = restrictedBrands[i];
                 if (text === brand || termSlug === brand || termName.toLowerCase() === brand) {
-                    $item.hide();
+                    $item.remove(); // REMOVE instead of hide
                     filteredTaxonomies++;
-                    console.log('[PAM] Hiding restricted brand:', text || termName);
+                    console.log('[PAM] Removing restricted brand:', text || termName);
                     return;
                 }
             }
         });
         
-        // 3. Hide "BRANDS" and "TAGS" headers if all items in those sections are hidden
+        // 3. Hide "BRANDS" and "TAGS" headers if all items in those sections are removed
         $('.dgwt-wcas-suggestion-group').each(function() {
             var $group = $(this);
-            var $visibleItems = $group.find('.dgwt-wcas-suggestion:visible, .dgwt-wcas-st:visible');
+            var $allItems = $group.find('.dgwt-wcas-suggestion, .dgwt-wcas-st');
             
-            if ($visibleItems.length === 0) {
-                $group.hide();
-                console.log('[PAM] Hiding empty group:', $group.find('.dgwt-wcas-suggestion-group-head').text());
+            if ($allItems.length === 0) {
+                $group.remove(); // REMOVE instead of hide
+                console.log('[PAM] Removing empty group:', $group.find('.dgwt-wcas-suggestion-group-head').text());
             }
         });
         
-        // 4. Update "VIEW MORE" counts
+        // 4. Update "VIEW MORE" counts by recounting visible products
         $('.dgwt-wcas-view-more').each(function() {
             var $viewMore = $(this);
+            
+            // Count how many products are actually remaining in the dropdown
+            var visibleProductsInDropdown = $('.dgwt-wcas-suggestion-product:visible, .dgwt-wcas-sp:visible').length;
+            
+            // The "VIEW MORE" count should be: total results - visible in dropdown
+            // Since we filtered some products, we need to recalculate
             var originalText = $viewMore.text();
             var match = originalText.match(/\((\d+)\)/);
             
-            if (match && filteredProducts > 0) {
-                var originalCount = parseInt(match[1]);
-                var newCount = originalCount - filteredProducts;
+            if (match) {
+                var originalTotalResults = parseInt(match[1]) + visibleProductsInDropdown;
+                var newTotalResults = originalTotalResults - filteredProducts;
+                var newViewMoreCount = newTotalResults - visibleProductsInDropdown;
                 
-                if (newCount <= 0) {
-                    // Hide the "VIEW MORE" button if no products remain
-                    $viewMore.hide();
-                    console.log('[PAM] Hiding VIEW MORE button - no products remain');
+                if (newViewMoreCount <= 0) {
+                    // Hide the "VIEW MORE" button if no more products exist
+                    $viewMore.remove();
+                    console.log('[PAM] Removing VIEW MORE button - no products remain');
                 } else {
                     // Update the count
-                    var newText = originalText.replace(/\(\d+\)/, '(' + newCount + ')');
+                    var newText = originalText.replace(/\(\d+\)/, '(' + newViewMoreCount + ')');
                     $viewMore.text(newText);
-                    console.log('[PAM] Updated VIEW MORE count: ' + originalCount + ' -> ' + newCount);
+                    console.log('[PAM] Updated VIEW MORE count: (' + match[1] + ') -> (' + newViewMoreCount + ')');
                 }
             }
         });
