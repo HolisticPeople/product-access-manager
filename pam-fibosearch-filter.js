@@ -1,10 +1,10 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.7.0
+ * Version: 1.7.1
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
- * - Remove VIEW MORE when filtering (count unreliable)
+ * - Smart VIEW MORE count adjustment
  * - Aggressive taxonomy selector targeting
  */
 (function($) {
@@ -183,15 +183,32 @@
             }
         });
         
-        // 4. Remove "VIEW MORE" button if we filtered any products
-        // We can't accurately recalculate the count since FiboSearch runs in SHORTINIT mode
-        // and doesn't know about our restrictions
-        if (filteredProducts > 0 || filteredTaxonomies > 0) {
+        // 4. Update or remove "VIEW MORE" button based on filtered products count
+        if (filteredProducts > 0) {
             $('.dgwt-wcas-view-more').each(function() {
                 var $viewMore = $(this);
                 var originalText = $viewMore.text();
-                console.log('[PAM] Removing VIEW MORE button - count unreliable after filtering:', originalText);
-                $viewMore.remove();
+                
+                // Extract the number from "» VIEW MORE (60)"
+                var match = originalText.match(/\((\d+)\)/);
+                
+                if (match) {
+                    var originalCount = parseInt(match[1]);
+                    var newCount = originalCount - filteredProducts;
+                    
+                    console.log('[PAM] VIEW MORE calculation: ' + originalCount + ' - ' + filteredProducts + ' = ' + newCount);
+                    
+                    if (newCount <= 0) {
+                        // Remove the button if no more products
+                        console.log('[PAM] Removing VIEW MORE button - no products remaining');
+                        $viewMore.remove();
+                    } else {
+                        // Update the count
+                        var newText = originalText.replace(/\((\d+)\)/, '(' + newCount + ')');
+                        $viewMore.text(newText);
+                        console.log('[PAM] Updated VIEW MORE: "' + originalText + '" → "' + newText + '"');
+                    }
+                }
             });
         }
         
