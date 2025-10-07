@@ -100,6 +100,12 @@ add_action( 'init', function () {
  */
 add_shortcode( 'has_access_tag', 'pam_has_access_tag_shortcode' );
 
+/**
+ * Add body class for products with access tags
+ * This allows Elementor conditions to check for CSS classes
+ */
+add_filter( 'body_class', 'pam_add_access_tag_body_class' );
+
 // ============================================================================
 // PRODUCT VISIBILITY FILTERS
 // ============================================================================
@@ -1346,5 +1352,55 @@ function pam_has_access_tag_shortcode( $atts ) {
 
     pam_log( 'has_access_tag shortcode: NO MATCH - returning 0' );
     return '0';
+}
+
+/**
+ * Add body class for products with access tags
+ * Adds classes like "has-access-tag" and "has-access-vimergy"
+ * 
+ * @param array $classes Existing body classes
+ * @return array Modified body classes
+ */
+function pam_add_access_tag_body_class( $classes ) {
+    // Only on single product pages
+    if ( ! is_product() ) {
+        return $classes;
+    }
+
+    global $product;
+    if ( ! $product instanceof WC_Product ) {
+        return $classes;
+    }
+
+    $pid = $product->get_id();
+    if ( $product->is_type( 'variation' ) ) {
+        $pid = $product->get_parent_id();
+    }
+
+    // Get product tag slugs
+    $slugs = wp_get_post_terms( $pid, 'product_tag', array( 'fields' => 'slugs' ) );
+    if ( is_wp_error( $slugs ) || empty( $slugs ) ) {
+        return $classes;
+    }
+
+    $found_access_tag = false;
+
+    // Add class for each access tag
+    foreach ( $slugs as $slug ) {
+        if ( strpos( $slug, 'access-' ) === 0 ) {
+            $found_access_tag = true;
+            // Add generic class
+            $classes[] = 'has-access-tag';
+            // Add specific brand class (e.g., "has-access-vimergy")
+            $classes[] = 'has-' . $slug;
+            pam_log( 'Added body class: has-' . $slug . ' for product ' . $pid );
+        }
+    }
+
+    if ( ! $found_access_tag ) {
+        pam_log( 'No access tags found for product ' . $pid );
+    }
+
+    return $classes;
 }
 
