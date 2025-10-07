@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.1.0' );
+define( 'PAM_VERSION', '1.1.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -52,14 +52,10 @@ add_action( 'plugins_loaded', function () {
     
     // FiboSearch integration - Filter during INDEXING (not search)
     // This prevents restricted products from being indexed at all
-    add_filter( 'dgwt/wcas/indexer/searchable/post_ids', 'pam_filter_fibo_indexable_products', 10, 1 );
-    add_filter( 'dgwt/wcas/indexer/readable/post_ids', 'pam_filter_fibo_indexable_products', 10, 1 );
-    add_filter( 'dgwt/wcas/tnt/indexer/product/should_index', 'pam_should_index_product', 10, 2 );
+    // Hook discovered: dgwt/wcas/indexer/post_source_query/excluded_ids
+    add_filter( 'dgwt/wcas/indexer/post_source_query/excluded_ids', 'pam_fibo_exclude_from_index', 10, 2 );
     
-    // Filter taxonomy terms from being indexed
-    add_filter( 'dgwt/wcas/tnt/indexer/taxonomy/should_index', 'pam_should_index_term', 10, 3 );
-    
-    pam_log( 'Registered FiboSearch indexer filters' );
+    pam_log( 'Registered FiboSearch indexer filter: post_source_query/excluded_ids' );
     
     // Legacy FiboSearch hooks (for older versions)
     add_filter( 'dgwt/wcas/products', 'pam_filter_fibo_products', 10, 2 );
@@ -380,22 +376,34 @@ function pam_filter_fibo_single( $suggestion, $context ) {
 // ============================================================================
 
 /**
- * Filter products that should be indexed by FiboSearch
+ * Exclude restricted products from FiboSearch index
  * Excludes ALL restricted products from the index (not user-specific)
  * 
- * @param array $product_ids Array of product IDs to index
- * @return array Filtered array
+ * Hook: dgwt/wcas/indexer/post_source_query/excluded_ids
+ * 
+ * @param array $excluded_ids Existing excluded IDs
+ * @param string $post_type Post type being indexed
+ * @return array Updated excluded IDs
  */
-function pam_filter_fibo_indexable_products( $product_ids ) {
-    pam_log( 'FiboSearch indexer: filtering ' . count( $product_ids ) . ' products' );
+function pam_fibo_exclude_from_index( $excluded_ids, $post_type ) {
+    pam_log( '=== FIBOSEARCH INDEXER CALLED ===' );
+    pam_log( 'FiboSearch indexer: post_type=' . $post_type . ' existing_excluded=' . count( $excluded_ids ) );
+    
+    // Only filter products
+    if ( $post_type !== 'product' ) {
+        pam_log( 'FiboSearch indexer: skipping non-product post type' );
+        return $excluded_ids;
+    }
     
     // Get ALL products with access-* tags (these are restricted)
     $restricted_slugs = pam_get_all_access_tag_slugs();
     
     if ( empty( $restricted_slugs ) ) {
         pam_log( 'FiboSearch indexer: no restricted tags found' );
-        return $product_ids;
+        return $excluded_ids;
     }
+    
+    pam_log( 'FiboSearch indexer: found ' . count( $restricted_slugs ) . ' restricted tags: ' . implode( ', ', $restricted_slugs ) );
     
     // Find products with these tags
     pam_is_internal_lookup( true );
@@ -424,67 +432,18 @@ function pam_filter_fibo_indexable_products( $product_ids ) {
     
     if ( empty( $restricted_ids ) ) {
         pam_log( 'FiboSearch indexer: no restricted products found' );
-        return $product_ids;
+        return $excluded_ids;
     }
     
-    // Remove restricted products from indexable list
-    $filtered = array_diff( $product_ids, $restricted_ids );
+    pam_log( 'FiboSearch indexer: found ' . count( $restricted_ids ) . ' restricted products to exclude' );
+    pam_log( 'FiboSearch indexer: restricted IDs: ' . implode( ', ', array_slice( $restricted_ids, 0, 10 ) ) . ( count( $restricted_ids ) > 10 ? '...' : '' ) );
     
-    pam_log( 'FiboSearch indexer: excluded ' . count( $restricted_ids ) . ' restricted products from index' );
+    // Merge with existing excluded IDs
+    $excluded_ids = array_unique( array_merge( (array) $excluded_ids, $restricted_ids ) );
     
-    return array_values( $filtered );
-}
-
-/**
- * Should this product be indexed?
- * 
- * @param bool $should_index Whether to index
- * @param int $product_id Product ID
- * @return bool
- */
-function pam_should_index_product( $should_index, $product_id ) {
-    if ( ! $should_index ) {
-        return false;
-    }
+    pam_log( 'FiboSearch indexer: total excluded=' . count( $excluded_ids ) );
     
-    // Check if product has access-* tags
-    $tags = wp_get_post_terms( $product_id, 'product_tag', array( 'fields' => 'slugs' ) );
-    
-    if ( is_wp_error( $tags ) || empty( $tags ) ) {
-        return $should_index;
-    }
-    
-    // If product has ANY access-* tag, don't index it
-    foreach ( $tags as $slug ) {
-        if ( 0 === strpos( $slug, 'access-' ) ) {
-            pam_log( 'FiboSearch indexer: skipping product ' . $product_id . ' (has access tag: ' . $slug . ')' );
-            return false;
-        }
-    }
-    
-    return $should_index;
-}
-
-/**
- * Should this term be indexed?
- * 
- * @param bool $should_index Whether to index
- * @param WP_Term $term Term object
- * @param string $taxonomy Taxonomy name
- * @return bool
- */
-function pam_should_index_term( $should_index, $term, $taxonomy ) {
-    if ( ! $should_index ) {
-        return false;
-    }
-    
-    // Don't index access-* tags or brands
-    if ( isset( $term->slug ) && 0 === strpos( $term->slug, 'access-' ) ) {
-        pam_log( 'FiboSearch indexer: skipping term ' . $term->slug . ' (' . $taxonomy . ')' );
-        return false;
-    }
-    
-    return $should_index;
+    return $excluded_ids;
 }
 
 /**
