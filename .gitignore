@@ -31,3 +31,6 @@ GITHUB-SECRETS-TEMPLATE.md
 QUICK-START.md
 SETUP-CHECKLIST.md
 START-HERE.md
+
+# Server access info (NEVER commit - contains sensitive data)
+SERVER-ACCESS.md
