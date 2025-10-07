@@ -99,6 +99,7 @@ add_action( 'init', function () {
  * Register the [has_access_tag] shortcode
  */
 add_shortcode( 'has_access_tag', 'pam_has_access_tag_shortcode' );
+pam_log( 'Shortcode [has_access_tag] registered successfully' );
 
 /**
  * Add body class for products with access tags
