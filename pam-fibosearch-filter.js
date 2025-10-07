@@ -1,11 +1,11 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.8.2
+ * Version: 1.8.3
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
  * - Smart VIEW MORE count - intercept AJAX to count ALL products (visible + VIEW MORE)
- * - Prevent FOUC (Flash of Unfiltered Content) with opacity transitions
+ * - Immediate filtering (no delays for performance)
  * - Aggressive taxonomy selector targeting
  */
 (function($) {
@@ -60,16 +60,11 @@
         
         if (pamRestrictedProducts.length === 0) {
             console.log('[PAM] No restricted products to filter');
-            // Show results if no filtering needed
-            $('.dgwt-wcas-suggestions-wrapp').css('opacity', '1');
             return;
         }
         
         console.log('[PAM] Filtering FiboSearch results...');
         console.log('[PAM] Using count from AJAX interceptor: ' + pamRestrictedInCurrentSearch + ' restricted products');
-        
-        // Hide results during filtering to prevent FOUC
-        $('.dgwt-wcas-suggestions-wrapp').css('opacity', '0');
         
         var filteredProducts = 0;
         var filteredTaxonomies = 0;
@@ -226,14 +221,6 @@
         }
         
         console.log('[PAM] Filtered ' + filteredProducts + ' products and ' + filteredTaxonomies + ' taxonomies from results');
-        
-        // Show results after filtering is complete (smooth transition)
-        setTimeout(function() {
-            $('.dgwt-wcas-suggestions-wrapp').css({
-                'opacity': '1',
-                'transition': 'opacity 0.15s ease-in'
-            });
-        }, 50);
     }
     
     // Initialize
@@ -275,7 +262,7 @@
         // Watch for FiboSearch results appearing using MutationObserver
         var observer = new MutationObserver(function(mutations) {
             console.log('[PAM] DOM mutation detected');
-            pamFilterFiboResults();
+            pamFilterFiboResults(); // No delay - filter immediately
         });
         
         // Observe multiple possible search containers
@@ -293,7 +280,7 @@
         $(document).ajaxComplete(function(event, xhr, settings) {
             if (settings.url && (settings.url.indexOf('dgwt_wcas') !== -1 || settings.url.indexOf('action=dgwt') !== -1)) {
                 console.log('[PAM] FiboSearch AJAX detected, filtering results');
-                setTimeout(pamFilterFiboResults, 100);
+                pamFilterFiboResults(); // No delay - filter immediately
             }
         });
         
