@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.7
+ * Version: 1.0.8
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.7' );
+define( 'PAM_VERSION', '1.0.8' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -62,6 +62,14 @@ add_action( 'plugins_loaded', function () {
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_tnt_taxonomy_suggestion', 10, 2 );
     // Filter final output (catch-all) - run early so other filters can still modify
     add_filter( 'dgwt/wcas/tnt/search_results/output', 'pam_filter_fibo_tnt_output', 5, 1 );
+    pam_log( 'Registered filter: dgwt/wcas/tnt/search_results/output' );
+    
+    // TEST: Add a simple inline filter to see if THIS gets called
+    add_filter( 'dgwt/wcas/tnt/search_results/output', function( $output ) {
+        error_log( '[PAM v' . ( defined('PAM_VERSION') ? PAM_VERSION : 'unknown' ) . '] === INLINE TNT OUTPUT FILTER CALLED ===' );
+        return $output;
+    }, 1, 1 );
+    pam_log( 'Registered INLINE test filter for dgwt/wcas/tnt/search_results/output' );
     
     // Legacy FiboSearch hooks (for older versions)
     add_filter( 'dgwt/wcas/products', 'pam_filter_fibo_products', 10, 2 );
