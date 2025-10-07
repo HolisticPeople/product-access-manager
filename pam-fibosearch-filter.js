@@ -1,10 +1,10 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.7.3
+ * Version: 1.8.0
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
- * - Smart VIEW MORE count - subtract TOTAL restricted products
+ * - Smart VIEW MORE count - only subtract restricted products IN current search
  * - Aggressive taxonomy selector targeting
  */
 (function($) {
@@ -12,6 +12,7 @@
     
     var pamRestrictedProducts = null;
     var pamIsLoading = false;
+    var pamRestrictedInCurrentSearch = 0; // Count of restricted products in current search results
     
     console.log('[PAM] FiboSearch filter script loaded');
     
@@ -65,6 +66,34 @@
         
         var filteredProducts = 0;
         var filteredTaxonomies = 0;
+        pamRestrictedInCurrentSearch = 0; // Reset count for new search
+        
+        // First pass: Count ALL restricted products in current search (visible + hidden)
+        $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp').each(function() {
+            var $item = $(this);
+            
+            // Skip if this is a taxonomy suggestion
+            if ($item.hasClass('dgwt-wcas-suggestion-taxonomy') || $item.closest('.dgwt-wcas-suggestion-taxonomy').length) {
+                return;
+            }
+            
+            var productId = null;
+            productId = $item.data('post-id') || $item.data('product-id') || $item.attr('data-post-id') || $item.attr('data-product-id');
+            
+            if (!productId) {
+                var url = $item.find('a').first().attr('href') || '';
+                var match = url.match(/[?&]p=(\d+)|\/product\/[^\/]+\/(\d+)|post_type=product.*?(\d+)/);
+                if (match) {
+                    productId = parseInt(match[1] || match[2] || match[3]);
+                }
+            }
+            
+            if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
+                pamRestrictedInCurrentSearch++;
+            }
+        });
+        
+        console.log('[PAM] Found ' + pamRestrictedInCurrentSearch + ' restricted products in current search results');
         
         // Extract brand names dynamically from access tags
         var restrictedBrands = [];
@@ -183,9 +212,9 @@
             }
         });
         
-        // 4. Update or remove "VIEW MORE" button based on TOTAL restricted products count
-        // Use pamRestrictedProducts.length (total restricted) not filteredProducts (only visible ones removed)
-        if (pamRestrictedProducts && pamRestrictedProducts.length > 0) {
+        // 4. Update or remove "VIEW MORE" button based on restricted products in CURRENT search
+        // Use pamRestrictedInCurrentSearch (restricted products matching this search term)
+        if (pamRestrictedInCurrentSearch > 0) {
             $('.dgwt-wcas-suggestion-more, .js-dgwt-wcas-suggestion-more').each(function() {
                 var $viewMore = $(this);
                 var originalText = $viewMore.text();
@@ -197,10 +226,9 @@
                 
                 if (match) {
                     var originalCount = parseInt(match[1]);
-                    var totalRestrictedProducts = pamRestrictedProducts.length;
-                    var newCount = originalCount - totalRestrictedProducts;
+                    var newCount = originalCount - pamRestrictedInCurrentSearch;
                     
-                    console.log('[PAM] VIEW MORE calculation: ' + originalCount + ' (server count) - ' + totalRestrictedProducts + ' (total restricted) = ' + newCount);
+                    console.log('[PAM] VIEW MORE calculation: ' + originalCount + ' (server count) - ' + pamRestrictedInCurrentSearch + ' (restricted in this search) = ' + newCount);
                     
                     if (newCount <= 0) {
                         // Remove the button if no more products
