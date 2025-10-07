@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.5
+ * Version: 1.0.6
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.5' );
+define( 'PAM_VERSION', '1.0.6' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -33,7 +33,8 @@ define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 if ( ! function_exists( 'pam_log' ) ) {
     function pam_log( $message ) {
         if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-            error_log( '[Product Access Manager] ' . $message );
+            $version = defined( 'PAM_VERSION' ) ? PAM_VERSION : 'unknown';
+            error_log( '[PAM v' . $version . '] ' . $message );
         }
     }
 }
