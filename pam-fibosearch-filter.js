@@ -1,10 +1,10 @@
 /**
  * Product Access Manager - FiboSearch Filter
  * Client-side filtering for FiboSearch results
- * Version: 1.8.0
+ * Version: 1.8.1
  * - Dynamic brand detection from access tags
  * - Remove (not hide) restricted items
- * - Smart VIEW MORE count - only subtract restricted products IN current search
+ * - Smart VIEW MORE count - intercept AJAX to count ALL products (visible + VIEW MORE)
  * - Aggressive taxonomy selector targeting
  */
 (function($) {
@@ -63,37 +63,10 @@
         }
         
         console.log('[PAM] Filtering FiboSearch results...');
+        console.log('[PAM] Using count from AJAX interceptor: ' + pamRestrictedInCurrentSearch + ' restricted products');
         
         var filteredProducts = 0;
         var filteredTaxonomies = 0;
-        pamRestrictedInCurrentSearch = 0; // Reset count for new search
-        
-        // First pass: Count ALL restricted products in current search (visible + hidden)
-        $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp').each(function() {
-            var $item = $(this);
-            
-            // Skip if this is a taxonomy suggestion
-            if ($item.hasClass('dgwt-wcas-suggestion-taxonomy') || $item.closest('.dgwt-wcas-suggestion-taxonomy').length) {
-                return;
-            }
-            
-            var productId = null;
-            productId = $item.data('post-id') || $item.data('product-id') || $item.attr('data-post-id') || $item.attr('data-product-id');
-            
-            if (!productId) {
-                var url = $item.find('a').first().attr('href') || '';
-                var match = url.match(/[?&]p=(\d+)|\/product\/[^\/]+\/(\d+)|post_type=product.*?(\d+)/);
-                if (match) {
-                    productId = parseInt(match[1] || match[2] || match[3]);
-                }
-            }
-            
-            if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
-                pamRestrictedInCurrentSearch++;
-            }
-        });
-        
-        console.log('[PAM] Found ' + pamRestrictedInCurrentSearch + ' restricted products in current search results');
         
         // Extract brand names dynamically from access tags
         var restrictedBrands = [];
@@ -255,6 +228,35 @@
         
         // Fetch restricted products immediately
         pamFetchRestrictedProducts();
+        
+        // Intercept FiboSearch AJAX responses to count ALL products (visible + VIEW MORE)
+        $(document).ajaxSuccess(function(event, xhr, settings) {
+            if (settings.url && settings.url.indexOf('dgwt_wcas') !== -1) {
+                try {
+                    var response = JSON.parse(xhr.responseText);
+                    if (response && response.suggestions) {
+                        console.log('[PAM] Intercepted FiboSearch AJAX response with ' + response.suggestions.length + ' suggestions');
+                        
+                        // Count restricted products in the ENTIRE response (visible + VIEW MORE)
+                        var restrictedCount = 0;
+                        for (var i = 0; i < response.suggestions.length; i++) {
+                            var suggestion = response.suggestions[i];
+                            if (suggestion.type === 'product' && suggestion.post_id) {
+                                var productId = parseInt(suggestion.post_id);
+                                if (pamRestrictedProducts && pamRestrictedProducts.indexOf(productId) !== -1) {
+                                    restrictedCount++;
+                                }
+                            }
+                        }
+                        
+                        console.log('[PAM] Found ' + restrictedCount + ' restricted products in FULL AJAX response (includes VIEW MORE)');
+                        pamRestrictedInCurrentSearch = restrictedCount;
+                    }
+                } catch (e) {
+                    console.log('[PAM] Could not parse FiboSearch response:', e);
+                }
+            }
+        });
         
         // Watch for FiboSearch results appearing using MutationObserver
         var observer = new MutationObserver(function(mutations) {
