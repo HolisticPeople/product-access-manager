@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.4.1
+ * Version: 1.4.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.4.1' );
+define( 'PAM_VERSION', '1.4.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -417,9 +417,14 @@ function pam_filter_fibo_product_suggestion( $output_data, $suggestion ) {
  * @return array|false Modified data or false to exclude
  */
 function pam_filter_fibo_taxonomy_suggestion( $output_data, $taxonomy ) {
+    // DEBUG: Log all taxonomy suggestions to see their structure
+    pam_log( 'FiboSearch Taxonomy DEBUG: taxonomy=' . $taxonomy . ' | data=' . print_r( $output_data, true ) );
+    
     // Get term slug from output data
     $term_slug = isset( $output_data['value'] ) ? $output_data['value'] : '';
     $term_name = isset( $output_data['name'] ) ? $output_data['name'] : '';
+    
+    pam_log( 'FiboSearch Taxonomy: slug="' . $term_slug . '" name="' . $term_name . '" taxonomy="' . $taxonomy . '"' );
     
     // Exclude access-* tags
     if ( 0 === strpos( $term_slug, 'access-' ) ) {
@@ -435,6 +440,8 @@ function pam_filter_fibo_taxonomy_suggestion( $output_data, $taxonomy ) {
         // Extract brand name from access tag (e.g., "access-vimergy-product" -> "vimergy")
         if ( preg_match( '/^access-([^-]+)/', $access_slug, $matches ) ) {
             $brand_slug = strtolower( $matches[1] );
+            
+            pam_log( 'FiboSearch: Checking brand - extracted="' . $brand_slug . '" vs term_slug="' . strtolower( $term_slug ) . '" vs term_name="' . strtolower( $term_name ) . '"' );
             
             // Check if current term matches the brand (case-insensitive)
             if ( strtolower( $term_slug ) === $brand_slug || strtolower( $term_name ) === $brand_slug ) {
