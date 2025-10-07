@@ -1289,6 +1289,9 @@ function pam_normalize_key( $slug, $suffixes ) {
  * @return string "1" if has access tag, "0" otherwise
  */
 function pam_has_access_tag_shortcode( $atts ) {
+    pam_log( '========== has_access_tag SHORTCODE CALLED ==========' );
+    pam_log( 'Raw attributes: ' . print_r( $atts, true ) );
+    
     $atts = shortcode_atts(
         array(
             'brands' => '',          // e.g. "vimergy,gaia"
@@ -1297,6 +1300,8 @@ function pam_has_access_tag_shortcode( $atts ) {
         $atts,
         'has_access_tag'
     );
+    
+    pam_log( 'Parsed attributes: brands="' . $atts['brands'] . '", prefix="' . $atts['prefix'] . '"' );
 
     // Resolve product ID (handles variations too)
     $pid = 0;
