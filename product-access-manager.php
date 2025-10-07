@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.0.1' );
+define( 'PAM_VERSION', '1.0.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -260,7 +260,10 @@ function pam_should_filter_query( $query ) {
  * Filter FiboSearch products and suggestions
  */
 function pam_filter_fibo_products( $items, $args ) {
+    pam_log( '=== FIBOSEARCH FILTER CALLED ===' );
     pam_log( 'FiboSearch products filter start: items=' . count( $items ) . ' user=' . ( is_user_logged_in() ? get_current_user_id() : 'guest' ) );
+    pam_log( 'Filter args: ' . print_r( $args, true ) );
+    pam_log( 'First item structure: ' . print_r( isset( $items[0] ) ? $items[0] : 'no items', true ) );
     
     if ( pam_user_has_full_access() ) {
         pam_log( 'FiboSearch products filter: user has full access.' );
