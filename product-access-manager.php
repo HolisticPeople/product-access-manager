@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.4.0
+ * Version: 1.4.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.4.0' );
+define( 'PAM_VERSION', '1.4.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -434,10 +434,10 @@ function pam_filter_fibo_taxonomy_suggestion( $output_data, $taxonomy ) {
     foreach ( $access_tag_slugs as $access_slug ) {
         // Extract brand name from access tag (e.g., "access-vimergy-product" -> "vimergy")
         if ( preg_match( '/^access-([^-]+)/', $access_slug, $matches ) ) {
-            $brand_slug = $matches[1];
+            $brand_slug = strtolower( $matches[1] );
             
-            // Check if current term matches the brand
-            if ( $term_slug === $brand_slug || strtolower( $term_name ) === $brand_slug ) {
+            // Check if current term matches the brand (case-insensitive)
+            if ( strtolower( $term_slug ) === $brand_slug || strtolower( $term_name ) === $brand_slug ) {
                 pam_log( 'FiboSearch: Excluding brand "' . $term_name . '" (matches access tag: ' . $access_slug . ')' );
                 return false;
             }
