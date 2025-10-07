@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: Limits visibility and purchasing of products tagged with "access-*" to users with matching roles. Includes shortcode for conditional stock display.
- * Version: 1.3.4
+ * Version: 1.4.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '1.3.4' );
+define( 'PAM_VERSION', '1.4.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -50,13 +50,19 @@ if ( ! function_exists( 'pam_log' ) ) {
 add_action( 'plugins_loaded', function () {
     pam_log( 'Plugins loaded - registering filters for user ' . ( is_user_logged_in() ? get_current_user_id() : 'guest' ) );
     
-    // FiboSearch integration - Client-side JavaScript filtering
-    // Since FiboSearch uses SHORTINIT mode, we filter results in the browser
+    // FiboSearch integration - Server-side filtering during search
+    // Filter individual product suggestions
+    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_product_suggestion', 10, 2 );
+    
+    // Filter taxonomy (brand/tag) suggestions
+    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/taxonomy', 'pam_filter_fibo_taxonomy_suggestion', 10, 2 );
+    
+    // Client-side filtering as backup
     add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
     add_action( 'wp_ajax_pam_get_restricted_products', 'pam_ajax_get_restricted_products' );
     add_action( 'wp_ajax_nopriv_pam_get_restricted_products', 'pam_ajax_get_restricted_products' );
     
-    pam_log( 'Registered FiboSearch client-side filtering' );
+    pam_log( 'Registered FiboSearch server-side and client-side filtering' );
 }, 5 ); // Priority 5 - run early
 
 /**
@@ -368,11 +374,81 @@ function pam_filter_fibo_single( $suggestion, $context ) {
 }
 
 // ============================================================================
-// FIBOSEARCH INDEXER INTEGRATION (Exclude from Index)
+// FIBOSEARCH SERVER-SIDE FILTERING (During AJAX Search)
 // ============================================================================
 
 /**
- * Enqueue FiboSearch filter script
+ * Filter FiboSearch product suggestions - remove restricted products
+ * 
+ * @param array $output_data The product suggestion data
+ * @param object $suggestion The raw suggestion object
+ * @return array|false Modified data or false to exclude
+ */
+function pam_filter_fibo_product_suggestion( $output_data, $suggestion ) {
+    // Get product ID from suggestion
+    $product_id = isset( $suggestion->ID ) ? intval( $suggestion->ID ) : 0;
+    
+    if ( ! $product_id ) {
+        return $output_data;
+    }
+    
+    // Check if user has access
+    if ( pam_user_has_full_access() ) {
+        return $output_data;
+    }
+    
+    // Get restricted products for current user
+    $restricted_ids = pam_get_restricted_product_ids();
+    
+    // If this product is restricted, exclude it from results
+    if ( in_array( $product_id, $restricted_ids, true ) ) {
+        pam_log( 'FiboSearch: Excluding restricted product ID ' . $product_id . ' from search results' );
+        return false; // Returning false excludes this suggestion
+    }
+    
+    return $output_data;
+}
+
+/**
+ * Filter FiboSearch taxonomy suggestions - remove access-* tags and associated brands
+ * 
+ * @param array $output_data The taxonomy suggestion data
+ * @param string $taxonomy The taxonomy name
+ * @return array|false Modified data or false to exclude
+ */
+function pam_filter_fibo_taxonomy_suggestion( $output_data, $taxonomy ) {
+    // Get term slug from output data
+    $term_slug = isset( $output_data['value'] ) ? $output_data['value'] : '';
+    $term_name = isset( $output_data['name'] ) ? $output_data['name'] : '';
+    
+    // Exclude access-* tags
+    if ( 0 === strpos( $term_slug, 'access-' ) ) {
+        pam_log( 'FiboSearch: Excluding access tag: ' . $term_slug );
+        return false;
+    }
+    
+    // Exclude brands that match access tag names
+    // e.g., if tag is "access-vimergy-product", exclude brand "Vimergy"
+    $access_tag_slugs = pam_get_all_access_tag_slugs();
+    
+    foreach ( $access_tag_slugs as $access_slug ) {
+        // Extract brand name from access tag (e.g., "access-vimergy-product" -> "vimergy")
+        if ( preg_match( '/^access-([^-]+)/', $access_slug, $matches ) ) {
+            $brand_slug = $matches[1];
+            
+            // Check if current term matches the brand
+            if ( $term_slug === $brand_slug || strtolower( $term_name ) === $brand_slug ) {
+                pam_log( 'FiboSearch: Excluding brand "' . $term_name . '" (matches access tag: ' . $access_slug . ')' );
+                return false;
+            }
+        }
+    }
+    
+    return $output_data;
+}
+
+/**
+ * Enqueue FiboSearch filter script (client-side backup)
  */
 function pam_enqueue_fibo_filter_script() {
     // Only enqueue on frontend
