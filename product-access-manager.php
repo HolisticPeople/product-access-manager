@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Vimergy products use "search" visibility + role-based filtering. HP and DCG catalogs are public.
- * Version: 2.3.1
+ * Version: 2.4.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.3.1' );
+define( 'PAM_VERSION', '2.4.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -100,26 +100,109 @@ add_action( 'plugins_loaded', function () {
 // ============================================================================
 
 /**
- * Get list of restricted catalogs
+ * Get list of PUBLIC catalogs (catalogs that don't require special access)
  * 
- * SINGLE SOURCE OF TRUTH for which catalogs require special access.
- * HP_catalog and DCG_catalog are PUBLIC (not in this list).
+ * SINGLE SOURCE OF TRUTH for which catalogs should remain public.
+ * Any catalog NOT in this list will automatically require role-based access.
  * 
- * To add a new restricted catalog:
- * 1. Add catalog to this array (e.g., 'Gaia_catalog')
+ * This is the INVERSE approach - we define what's public, everything else is restricted.
+ * 
+ * To add a new PUBLIC catalog:
+ * 1. Add catalog name to this array (e.g., 'NewPublic_catalog')
+ * 
+ * To add a new RESTRICTED catalog:
+ * 1. Add catalog choice to ACF field (e.g., 'Gaia_catalog')
  * 2. Create corresponding user role (e.g., 'access-gaia-user')
- * 3. Set products' site_catalog ACF field to the new catalog
- * 4. That's it! No other code changes needed.
+ * 3. That's it! No code changes needed - it auto-detects!
  * 
- * @return array List of restricted catalog names (e.g., ['Vimergy_catalog', 'Gaia_catalog'])
+ * @return array List of public catalog names (e.g., ['HP_catalog', 'DCG_catalog'])
+ */
+function pam_get_public_catalogs() {
+    return array(
+        'HP_catalog',
+        'DCG_catalog',
+        // Add future PUBLIC catalogs here if needed:
+        // 'FreeProducts_catalog',
+    );
+}
+
+/**
+ * Get all possible catalog values from ACF field
+ * 
+ * This dynamically discovers all catalogs by checking:
+ * 1. ACF field choices (if field object is available)
+ * 2. Existing products with site_catalog set (fallback)
+ * 
+ * @return array All catalog values (e.g., ['Vimergy_catalog', 'HP_catalog', 'DCG_catalog', 'Gaia_catalog'])
+ */
+function pam_get_all_catalogs() {
+    $all_catalogs = array();
+    
+    // Try to get from ACF field choices first
+    if ( function_exists( 'acf_get_field' ) ) {
+        $field = acf_get_field( 'site_catalog' );
+        if ( $field && ! empty( $field['choices'] ) ) {
+            $all_catalogs = array_keys( $field['choices'] );
+        }
+    }
+    
+    // Fallback: Get from existing products
+    if ( empty( $all_catalogs ) ) {
+        global $wpdb;
+        $results = $wpdb->get_col( 
+            "SELECT DISTINCT meta_value 
+             FROM {$wpdb->postmeta} 
+             WHERE meta_key = 'site_catalog' 
+             AND meta_value LIKE '%_catalog'"
+        );
+        
+        if ( ! empty( $results ) ) {
+            foreach ( $results as $serialized ) {
+                // ACF stores as serialized array
+                $unserialized = maybe_unserialize( $serialized );
+                if ( is_array( $unserialized ) ) {
+                    $all_catalogs = array_merge( $all_catalogs, $unserialized );
+                } else {
+                    $all_catalogs[] = $unserialized;
+                }
+            }
+            $all_catalogs = array_unique( $all_catalogs );
+        }
+    }
+    
+    // Filter out empty values
+    $all_catalogs = array_filter( $all_catalogs );
+    
+    return $all_catalogs;
+}
+
+/**
+ * Get list of RESTRICTED catalogs (catalogs that require role-based access)
+ * 
+ * AUTO-DETECTS restricted catalogs by:
+ * 1. Getting all catalogs from ACF field or database
+ * 2. Excluding public catalogs from pam_get_public_catalogs()
+ * 3. Everything else is automatically restricted!
+ * 
+ * NO CODE CHANGES NEEDED to add new restricted catalogs:
+ * - Just add catalog to ACF field choices (e.g., 'Gaia_catalog')
+ * - Create corresponding role (e.g., 'access-gaia-user')
+ * - Plugin auto-detects and restricts it!
+ * 
+ * @return array List of restricted catalog names (auto-detected)
  */
 function pam_get_restricted_catalogs() {
-    return array(
-        'Vimergy_catalog',
-        // Add future restricted catalogs here:
-        // 'Gaia_catalog',
-        // 'NewBrand_catalog',
-    );
+    $all_catalogs = pam_get_all_catalogs();
+    $public_catalogs = pam_get_public_catalogs();
+    
+    // Restricted = All catalogs MINUS public catalogs
+    $restricted_catalogs = array_diff( $all_catalogs, $public_catalogs );
+    
+    pam_log( 'Auto-detected catalogs - All: ' . implode( ', ', $all_catalogs ) . 
+             ' | Public: ' . implode( ', ', $public_catalogs ) . 
+             ' | Restricted: ' . implode( ', ', $restricted_catalogs ) );
+    
+    return array_values( $restricted_catalogs );
 }
 
 /**

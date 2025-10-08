@@ -1,21 +1,28 @@
 # Adding New Restricted Catalogs
 ## Product Access Manager - Quick Guide
 
-**Version:** 2.3.1+  
+**Version:** 2.4.0+  
 **Updated:** October 8, 2025
 
 ---
 
 ## Overview
 
-The Product Access Manager uses a **centralized configuration** for restricted catalogs. Adding a new restricted catalog (like Gaia, Dr. Coussens, etc.) is a simple 4-step process.
+The Product Access Manager uses **AUTOMATIC DETECTION** for restricted catalogs. Adding a new restricted catalog (like Gaia, Dr. Coussens, etc.) requires **ZERO CODE CHANGES** - just add it to ACF and create the role!
 
-**Current Restricted Catalogs:**
-- ✅ `Vimergy_catalog` → Requires `access-vimergy-user` role
+**How It Works:**
+- ✅ **Public Catalogs** are defined in code (HP_catalog, DCG_catalog)
+- ✅ **ALL OTHER CATALOGS** are automatically restricted
+- ✅ Plugin auto-detects catalogs from ACF field choices
+- ✅ No code changes needed to add new restricted catalogs!
 
-**Public Catalogs (No Restrictions):**
+**Current Public Catalogs (Hardcoded):**
 - ✅ `HP_catalog` → Public (visible to all)
 - ✅ `DCG_catalog` → Public (visible to all)
+
+**Current Restricted Catalogs (Auto-Detected):**
+- ✅ `Vimergy_catalog` → Requires `access-vimergy-user` role
+- ✅ Any other `XXX_catalog` you add → Requires `access-xxx-user` role
 
 ---
 
@@ -23,25 +30,29 @@ The Product Access Manager uses a **centralized configuration** for restricted c
 
 ### Example: Adding "Gaia" as a restricted catalog
 
-#### **STEP 1: Update Code (1 line change!)**
+#### **STEP 1: Add to ACF Field Choices**
 
-Edit `product-access-manager.php` and find the `pam_get_restricted_catalogs()` function (around line 116):
+In WordPress Admin → Custom Fields → Edit `site_catalog` field:
 
-```php
-function pam_get_restricted_catalogs() {
-    return array(
-        'Vimergy_catalog',
-        // Add future restricted catalogs here:
-        'Gaia_catalog',        // ← Add this line
-        // 'NewBrand_catalog',
-    );
-}
+```
+Field Type: Checkbox (or Select)
+Choices:
+  Vimergy_catalog : Vimergy
+  HP_catalog : Holistic People
+  DCG_catalog : Dr. Coussens
+  Gaia_catalog : Gaia         ← Add this line!
+
+Return Format: Value
 ```
 
-**That's it for code changes!** The centralized function is used by all 3 core functions:
-- `pam_is_restricted_product()` ✅
-- `pam_get_required_roles()` ✅
-- `pam_get_restricted_brand_names()` ✅
+Save the field group.
+
+**That's it for setup!** The plugin will auto-detect `Gaia_catalog` and:
+- ✅ Automatically restrict it (not in public list)
+- ✅ Automatically map to `access-gaia-user` role
+- ✅ Apply all security filters
+
+**NO CODE CHANGES NEEDED!** 🎉
 
 ---
 
@@ -159,24 +170,36 @@ All catalogs visible → Works
 
 ## Code Architecture (How It Works)
 
-### Single Source of Truth
+### Auto-Detection System
 ```php
+// Step 1: Define what's PUBLIC (everything else is restricted)
+function pam_get_public_catalogs() {
+    return array( 'HP_catalog', 'DCG_catalog' );
+}
+
+// Step 2: Auto-detect ALL catalogs from ACF field
+function pam_get_all_catalogs() {
+    // Reads from ACF field choices or database
+    // Returns: ['Vimergy_catalog', 'HP_catalog', 'DCG_catalog', 'Gaia_catalog', ...]
+}
+
+// Step 3: Calculate restricted catalogs automatically
 function pam_get_restricted_catalogs() {
-    return array(
-        'Vimergy_catalog',
-        'Gaia_catalog',        // Easy to add!
-        // 'NewBrand_catalog',  // Easy to add!
-    );
+    $all = pam_get_all_catalogs();
+    $public = pam_get_public_catalogs();
+    return array_diff( $all, $public ); // Restricted = All - Public
 }
 ```
 
 ### Automatic Role Mapping
 ```
-Catalog          →  Required Role
------------------------------------------
+Catalog          →  Required Role (Auto-Mapped)
+-------------------------------------------------
 Vimergy_catalog  →  access-vimergy-user
 Gaia_catalog     →  access-gaia-user
 NewBrand_catalog →  access-newbrand-user
+HP_catalog       →  (none - public)
+DCG_catalog      →  (none - public)
 ```
 
 **The mapping is automatic** - the code extracts the brand name and creates the role slug:
@@ -190,37 +213,55 @@ $role = 'access-' . $brand . '-user';
 
 ## Example: Adding Multiple Catalogs
 
-```php
-function pam_get_restricted_catalogs() {
-    return array(
-        'Vimergy_catalog',
-        'Gaia_catalog',
-        'DrCoussens_catalog',
-        'NewBrand_catalog',
-    );
-}
+**ACF Field Choices:**
+```
+Vimergy_catalog : Vimergy
+HP_catalog : Holistic People
+DCG_catalog : Dr. Coussens
+Gaia_catalog : Gaia
+DrCoussens_catalog : Dr. Coussens Products
+NewBrand_catalog : New Brand
 ```
 
-**Required Roles (automatically):**
+**Auto-Detection Results:**
+- **Public:** HP_catalog, DCG_catalog (hardcoded in `pam_get_public_catalogs()`)
+- **Restricted:** Vimergy_catalog, Gaia_catalog, DrCoussens_catalog, NewBrand_catalog (auto-detected)
+
+**Required Roles (automatically mapped):**
 - `access-vimergy-user`
 - `access-gaia-user`
 - `access-drcoussens-user`
 - `access-newbrand-user`
 
-**No other code changes needed!** The entire system adapts automatically.
+**Zero code changes!** Just add to ACF and the system adapts automatically.
 
 ---
 
 ## What Stays PUBLIC?
 
-Any catalog **NOT in the `pam_get_restricted_catalogs()` array** remains public:
+Only catalogs **explicitly listed in `pam_get_public_catalogs()`** remain public:
 
 ```php
-// These are PUBLIC (not in restricted list):
+function pam_get_public_catalogs() {
+    return array(
+        'HP_catalog',
+        'DCG_catalog',
+        // Add more public catalogs here if needed
+    );
+}
+```
+
+**Everything else is automatically RESTRICTED!** 🔒
+
+```
+Public (Hardcoded):
 - HP_catalog        → Visible to all
 - DCG_catalog       → Visible to all
-- Supplements_catalog → Visible to all
-- Any other catalog → Visible to all
+
+Restricted (Auto-Detected):
+- Vimergy_catalog   → Requires access-vimergy-user
+- Gaia_catalog      → Requires access-gaia-user  
+- ANY other XXX_catalog → Requires access-xxx-user
 ```
 
 ---
@@ -229,8 +270,8 @@ Any catalog **NOT in the `pam_get_restricted_catalogs()` array** remains public:
 
 When adding a new restricted catalog:
 
-- [ ] Update `pam_get_restricted_catalogs()` function
-- [ ] Create corresponding WordPress role
+- [ ] Add catalog to ACF field choices (e.g., `Gaia_catalog : Gaia`)
+- [ ] Create corresponding WordPress role (e.g., `access-gaia-user`)
 - [ ] Set products' ACF `site_catalog` field
 - [ ] Set products' WC visibility to "search"
 - [ ] Reindex FiboSearch
@@ -242,11 +283,21 @@ When adding a new restricted catalog:
 - [ ] Test thoroughly on staging
 - [ ] Deploy to production
 
+**NO CODE CHANGES NEEDED!** ✅
+
 ---
 
 ## Version History
 
-### v2.3.1 (Current)
+### v2.4.0 (Current) 🚀
+✅ **AUTO-DETECTION** - Zero code changes to add catalogs!  
+✅ Reads catalogs from ACF field choices dynamically  
+✅ Inverse approach: Define public, everything else restricted  
+✅ `pam_get_all_catalogs()` - Discovers catalogs automatically  
+✅ `pam_get_public_catalogs()` - Only HP/DCG hardcoded  
+✅ `pam_get_restricted_catalogs()` - Calculates automatically  
+
+### v2.3.1
 ✅ Centralized `pam_get_restricted_catalogs()` function  
 ✅ Single source of truth for all restricted catalogs  
 ✅ Easy to add new catalogs (1 line change)  
@@ -259,11 +310,17 @@ When adding a new restricted catalog:
 
 ## Questions?
 
+**Q: Do I need to change any code to add a new restricted catalog?**  
+A: **NO!** Just add the catalog to ACF field choices. The plugin auto-detects it!
+
 **Q: Do I need to change the JavaScript file?**  
 A: No! It automatically uses the restricted brands from the PHP function.
 
 **Q: What if I want to make HP or DCG restricted?**  
-A: Add `'HP_catalog'` to the `pam_get_restricted_catalogs()` array. That's it!
+A: Remove them from `pam_get_public_catalogs()`. Then they'll be auto-detected as restricted!
+
+**Q: What if I want to add a new PUBLIC catalog?**  
+A: Add it to `pam_get_public_catalogs()` array in the code.
 
 **Q: Can I have a product in multiple catalogs?**  
 A: Yes! The ACF field supports multiple values. If ANY catalog is restricted, the product becomes restricted.
@@ -274,15 +331,18 @@ A: It becomes restricted. Security first!
 **Q: Do users need ALL roles or just ONE?**  
 A: Just ONE. If a product requires `access-vimergy-user` OR `access-gaia-user`, having either role grants access.
 
+**Q: How does the plugin discover new catalogs?**  
+A: It reads from ACF field choices first, then fallbacks to checking existing products in the database.
+
 ---
 
 ## Ready to Add a New Catalog?
 
-**Simplest Workflow:**
-1. Edit `product-access-manager.php` line ~118
-2. Add `'YourBrand_catalog',` to the array
-3. Create `access-yourbrand-user` role in WordPress
+**ZERO-CODE Workflow:**
+1. Add catalog to ACF field choices (e.g., `Gaia_catalog : Gaia`)
+2. Create `access-gaia-user` role in WordPress
+3. Set products' `site_catalog` ACF field to `Gaia_catalog`
 4. Done! 🎉
 
-Everything else adapts automatically thanks to the centralized architecture.
+**NO CODE CHANGES!** The plugin auto-detects and handles everything!
 
