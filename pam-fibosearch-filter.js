@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.1.2
+ * Version: 2.1.3
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -59,8 +59,12 @@
         
         console.log('[PAM FiboSearch] Starting filter - restricted products:', pamRestrictedProducts.length, 'restricted brands:', pamRestrictedBrands);
         
+        // DEBUG: Check if selectors find any elements
+        var $suggestions = $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp');
+        console.log('[PAM FiboSearch] Found', $suggestions.length, 'potential product elements');
+        
         // 1. Filter product suggestions - exact selectors from v1.9.0
-        $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp').each(function() {
+        $suggestions.each(function() {
             var $item = $(this);
             
             // Skip if already removed
@@ -113,7 +117,10 @@
             '.dgwt-wcas-suggestions-wrapp li'
         ];
         
-        $(taxonomySelectors.join(', ')).each(function() {
+        var $taxonomies = $(taxonomySelectors.join(', '));
+        console.log('[PAM FiboSearch] Found', $taxonomies.length, 'potential taxonomy elements');
+        
+        $taxonomies.each(function() {
             var $item = $(this);
             
             // Skip if already processed
