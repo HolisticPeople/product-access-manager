@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Products in restricted catalogs are hidden by default, revealed to authorized users.
- * Version: 2.1.7
+ * Version: 2.2.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,12 +27,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.1.7' );
+define( 'PAM_VERSION', '2.2.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 // Debug mode - set to false in production
-define( 'PAM_DEBUG', true );
+define( 'PAM_DEBUG', false );
 
 /**
  * Debug logging function

@@ -1,9 +1,11 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.1.7
+ * Version: 2.2.0
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
+ * 
+ * Production ready - all debug logging removed.
  */
 (function($) {
     'use strict';
@@ -12,8 +14,6 @@
     var pamRestrictedProductUrls = [];
     var pamIsLoading = false;
     var pamRestrictedBrands = [];
-    
-    console.log('[PAM FiboSearch] Script loaded, AJAX URL:', pamFiboFilter.ajaxUrl);
     
     // Fetch restricted products from server
     function pamFetchRestrictedProducts() {
@@ -30,23 +30,17 @@
                 action: 'pam_get_restricted_data'
             },
         success: function(response) {
-            console.log('[PAM FiboSearch] AJAX response:', response);
             if (response.success) {
                 pamRestrictedProducts = response.data.products || [];
                 pamRestrictedProductUrls = response.data.product_urls || [];
                 pamRestrictedBrands = response.data.brands || [];
-                console.log('[PAM FiboSearch] Restricted products:', pamRestrictedProducts.length);
-                console.log('[PAM FiboSearch] Restricted product URLs:', pamRestrictedProductUrls.length);
-                console.log('[PAM FiboSearch] Restricted brands:', pamRestrictedBrands);
                 
-                // CRITICAL: Trigger filter after data loads!
-                console.log('[PAM FiboSearch] Data loaded - triggering immediate filter');
+                // Trigger filter after data loads
                 pamFilterFiboResults();
             }
             pamIsLoading = false;
         },
             error: function(xhr, status, error) {
-                console.error('[PAM FiboSearch] AJAX error:', error, xhr.responseText);
                 pamRestrictedProducts = [];
                 pamRestrictedProductUrls = [];
                 pamRestrictedBrands = [];
@@ -58,20 +52,15 @@
     // Filter FiboSearch results
     function pamFilterFiboResults() {
         if (pamRestrictedProducts === null || pamRestrictedProducts.length === 0) {
-            console.log('[PAM FiboSearch] No restricted products to filter');
             return;
         }
         
         var filteredProducts = 0;
         var filteredBrands = 0;
         
-        console.log('[PAM FiboSearch] Starting filter - restricted products:', pamRestrictedProducts.length, 'restricted brands:', pamRestrictedBrands);
-        
-        // DEBUG: Check if selectors find any elements
         var $suggestions = $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp');
-        console.log('[PAM FiboSearch] Found', $suggestions.length, 'potential product elements');
         
-        // 1. Filter product suggestions - exact selectors from v1.9.0
+        // 1. Filter product suggestions
         $suggestions.each(function() {
             var $item = $(this);
             
@@ -85,36 +74,25 @@
                 return;
             }
             
-            // DEBUG: Log all attributes to see what's available
-            var attrs = {};
-            $.each($item[0].attributes, function(idx, attr) {
-                attrs[attr.nodeName] = attr.nodeValue;
-            });
-            console.log('[PAM FiboSearch] Product element attributes:', attrs);
-            
-            // Get product ID - exact logic from v1.9.0
+            // Get product ID
             var productId = $item.data('post-id') || $item.data('product-id') || $item.attr('data-post-id') || $item.attr('data-product-id');
             
             if (!productId) {
                 var url = $item.find('a').first().attr('href') || '';
-                console.log('[PAM FiboSearch] Product URL:', url);
                 var match = url.match(/[?&]p=(\d+)|\/product\/[^\/]+\/(\d+)|post_type=product.*?(\d+)/);
                 if (match) {
                     productId = parseInt(match[1] || match[2] || match[3]);
                 }
             }
             
-            console.log('[PAM FiboSearch] Checking product ID:', productId, 'Restricted?', pamRestrictedProducts.indexOf(parseInt(productId)) !== -1);
-            
             if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
-                console.log('[PAM FiboSearch] REMOVING product:', productId);
-                $item.data('pam-removed', true); // Mark as removed
+                $item.data('pam-removed', true);
                 $item.remove();
                 filteredProducts++;
             }
         });
         
-        // 2. Filter taxonomy suggestions (brands/tags) - exact selectors from v1.9.0
+        // 2. Filter taxonomy suggestions (brands/tags)
         var taxonomySelectors = [
             '.dgwt-wcas-suggestion-taxonomy',
             '.dgwt-wcas-st',
@@ -126,7 +104,6 @@
         ];
         
         var $taxonomies = $(taxonomySelectors.join(', '));
-        console.log('[PAM FiboSearch] Found', $taxonomies.length, 'potential taxonomy elements');
         
         $taxonomies.each(function() {
             var $item = $(this);
@@ -143,8 +120,7 @@
             for (var i = 0; i < pamRestrictedBrands.length; i++) {
                 var brand = pamRestrictedBrands[i].toLowerCase();
                 if (text.indexOf(brand) !== -1) {
-                    console.log('[PAM FiboSearch] REMOVING brand:', text, 'matches', pamRestrictedBrands[i]);
-                    $item.data('pam-removed', true); // Mark as removed
+                    $item.data('pam-removed', true);
                     $item.remove();
                     filteredBrands++;
                     break;
@@ -172,15 +148,12 @@
                 // Normalize URLs for comparison (remove trailing slash, query params, etc.)
                 var normalizedUrl = url.split('?')[0].replace(/\/$/, '');
                 
-                console.log('[PAM FiboSearch] RIGHT PANEL: Checking URL:', normalizedUrl);
-                
                 // Check if this URL matches any restricted product URL
                 for (var i = 0; i < pamRestrictedProductUrls.length; i++) {
                     var restrictedUrl = pamRestrictedProductUrls[i].split('?')[0].replace(/\/$/, '');
                     
                     if (normalizedUrl === restrictedUrl) {
                         shouldRemove = true;
-                        console.log('[PAM FiboSearch] RIGHT PANEL: URL matches restricted product:', restrictedUrl);
                         return false; // break
                     }
                 }
@@ -191,7 +164,6 @@
             });
             
             if (shouldRemove) {
-                console.log('[PAM FiboSearch] REMOVING right panel details');
                 $detailsInner.data('pam-removed', true);
                 $detailsInner.remove();
                 
@@ -202,8 +174,6 @@
                 }
             }
         });
-        
-        console.log('[PAM FiboSearch] Filtered', filteredProducts, 'products and', filteredBrands, 'brands');
         
         // 4. Remove empty groups
         $('.dgwt-wcas-suggestion-group').each(function() {
