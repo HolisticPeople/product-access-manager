@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Vimergy products use "search" visibility + role-based filtering. HP and DCG catalogs are public.
- * Version: 2.3.0
+ * Version: 2.3.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.3.0' );
+define( 'PAM_VERSION', '2.3.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -100,9 +100,33 @@ add_action( 'plugins_loaded', function () {
 // ============================================================================
 
 /**
+ * Get list of restricted catalogs
+ * 
+ * SINGLE SOURCE OF TRUTH for which catalogs require special access.
+ * HP_catalog and DCG_catalog are PUBLIC (not in this list).
+ * 
+ * To add a new restricted catalog:
+ * 1. Add catalog to this array (e.g., 'Gaia_catalog')
+ * 2. Create corresponding user role (e.g., 'access-gaia-user')
+ * 3. Set products' site_catalog ACF field to the new catalog
+ * 4. That's it! No other code changes needed.
+ * 
+ * @return array List of restricted catalog names (e.g., ['Vimergy_catalog', 'Gaia_catalog'])
+ */
+function pam_get_restricted_catalogs() {
+    return array(
+        'Vimergy_catalog',
+        // Add future restricted catalogs here:
+        // 'Gaia_catalog',
+        // 'NewBrand_catalog',
+    );
+}
+
+/**
  * Check if product is restricted (has restricted site_catalog ACF field set)
  * 
- * NOTE: Only Vimergy_catalog is restricted. HP_catalog and DCG_catalog are PUBLIC.
+ * NOTE: Only catalogs in pam_get_restricted_catalogs() are restricted.
+ * HP_catalog and DCG_catalog are PUBLIC.
  * 
  * @param int|WC_Product $product Product ID or object
  * @return bool True if product is restricted
@@ -122,8 +146,8 @@ function pam_is_restricted_product( $product ) {
         return false;
     }
     
-    // Define restricted catalogs (HP and DCG are public)
-    $restricted_catalogs = array( 'Vimergy_catalog' );
+    // Get restricted catalogs from centralized function
+    $restricted_catalogs = pam_get_restricted_catalogs();
     
     // Check if product has any restricted catalog
     foreach ( (array) $catalogs as $catalog ) {
@@ -158,8 +182,8 @@ function pam_get_required_roles( $product ) {
         return [];
     }
     
-    // Define restricted catalogs (HP and DCG are public)
-    $restricted_catalogs = array( 'Vimergy_catalog' );
+    // Get restricted catalogs from centralized function
+    $restricted_catalogs = pam_get_restricted_catalogs();
     
     $roles = [];
     foreach ( (array) $catalogs as $catalog ) {
@@ -539,8 +563,8 @@ function pam_get_restricted_brand_names() {
         return [];
     }
     
-    // Define restricted catalogs (HP and DCG are public)
-    $restricted_catalogs_list = array( 'Vimergy_catalog' );
+    // Get restricted catalogs from centralized function
+    $restricted_catalogs_list = pam_get_restricted_catalogs();
     
     // Get user's accessible catalogs
     $accessible_catalogs = [];
