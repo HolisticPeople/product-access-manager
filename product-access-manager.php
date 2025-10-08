@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Product Access Manager
  * Plugin URI: 
- * Description: ACF-based product access control. Products in restricted catalogs are hidden by default, revealed to authorized users.
- * Version: 2.2.0
+ * Description: ACF-based product access control. Vimergy products use "search" visibility + role-based filtering. HP and DCG catalogs are public.
+ * Version: 2.3.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.2.0' );
+define( 'PAM_VERSION', '2.3.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -100,7 +100,9 @@ add_action( 'plugins_loaded', function () {
 // ============================================================================
 
 /**
- * Check if product is restricted (has site_catalog ACF field set)
+ * Check if product is restricted (has restricted site_catalog ACF field set)
+ * 
+ * NOTE: Only Vimergy_catalog is restricted. HP_catalog and DCG_catalog are PUBLIC.
  * 
  * @param int|WC_Product $product Product ID or object
  * @return bool True if product is restricted
@@ -115,14 +117,31 @@ function pam_is_restricted_product( $product ) {
     }
     
     $catalogs = get_field( 'site_catalog', $product_id );
+    if ( empty( $catalogs ) ) {
+        pam_log( 'Product ' . $product_id . ' has no catalogs - unrestricted' );
+        return false;
+    }
     
-    pam_log( 'Product ' . $product_id . ' catalogs: ' . ( empty( $catalogs ) ? 'none' : implode( ', ', (array) $catalogs ) ) );
+    // Define restricted catalogs (HP and DCG are public)
+    $restricted_catalogs = array( 'Vimergy_catalog' );
     
-    return ! empty( $catalogs );
+    // Check if product has any restricted catalog
+    foreach ( (array) $catalogs as $catalog ) {
+        if ( in_array( $catalog, $restricted_catalogs, true ) ) {
+            pam_log( 'Product ' . $product_id . ' is RESTRICTED by catalog: ' . $catalog );
+            return true;
+        }
+    }
+    
+    pam_log( 'Product ' . $product_id . ' has PUBLIC catalogs only: ' . implode( ', ', (array) $catalogs ) );
+    return false;
 }
 
 /**
  * Get required roles for a product based on its site_catalog ACF field
+ * 
+ * NOTE: Only returns roles for RESTRICTED catalogs (Vimergy).
+ * HP_catalog and DCG_catalog are public, so they don't require any roles.
  * 
  * @param int|WC_Product $product Product ID or object
  * @return array Array of required role slugs (e.g., ['access-vimergy-user'])
@@ -139,17 +158,22 @@ function pam_get_required_roles( $product ) {
         return [];
     }
     
+    // Define restricted catalogs (HP and DCG are public)
+    $restricted_catalogs = array( 'Vimergy_catalog' );
+    
     $roles = [];
     foreach ( (array) $catalogs as $catalog ) {
-        // Map catalog to role
-        // "Vimergy_catalog" → "access-vimergy-user"
-        // "DCG_catalog" → "access-dcg-user"
-        // "HP_catalog" → "access-hp-user"
+        // Only add roles for restricted catalogs
+        if ( ! in_array( $catalog, $restricted_catalogs, true ) ) {
+            continue; // Skip public catalogs
+        }
+        
+        // Map catalog to role: "Vimergy_catalog" → "access-vimergy-user"
         $brand = strtolower( str_replace( '_catalog', '', $catalog ) );
         $roles[] = 'access-' . $brand . '-user';
     }
     
-    pam_log( 'Product ' . $product_id . ' required roles: ' . implode( ', ', $roles ) );
+    pam_log( 'Product ' . $product_id . ' required roles: ' . ( empty( $roles ) ? 'none (public)' : implode( ', ', $roles ) ) );
     
     return $roles;
 }
@@ -515,8 +539,8 @@ function pam_get_restricted_brand_names() {
         return [];
     }
     
-    // Get all possible catalog values
-    $all_catalogs = array( 'Vimergy_catalog', 'DCG_catalog', 'HP_catalog' );
+    // Define restricted catalogs (HP and DCG are public)
+    $restricted_catalogs_list = array( 'Vimergy_catalog' );
     
     // Get user's accessible catalogs
     $accessible_catalogs = [];
@@ -533,7 +557,8 @@ function pam_get_restricted_brand_names() {
     }
     
     // Get restricted catalogs (ones user can't access)
-    $restricted_catalogs = array_diff( $all_catalogs, $accessible_catalogs );
+    // Only consider catalogs that are actually restricted (not HP/DCG)
+    $restricted_catalogs = array_diff( $restricted_catalogs_list, $accessible_catalogs );
     
     // Convert to brand names for display filtering
     $restricted_brands = [];
