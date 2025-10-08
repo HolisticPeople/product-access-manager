@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.0.9
+ * Version: 2.1.0
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -122,9 +122,51 @@
             }
         });
         
+        // 3. Filter RIGHT PANEL details (product cards that appear on hover/selection)
+        $('.dgwt-wcas-details-inner-product, .dgwt-wcas-details-inner[data-post-type="product"]').each(function() {
+            var $item = $(this);
+            
+            // Try to get product ID from URL in the details panel
+            var productId = null;
+            var $link = $item.find('a[href*="/product/"]').first();
+            
+            if ($link.length) {
+                var url = $link.attr('href') || '';
+                var match = url.match(/\/product\/([^\/]+)\//);
+                if (match) {
+                    // Extract product slug and find ID from data attributes
+                    var $allLinks = $('.dgwt-wcas-suggestion a[href*="' + match[0] + '"]');
+                    $allLinks.each(function() {
+                        var $parent = $(this).closest('.dgwt-wcas-suggestion');
+                        var id = $parent.data('post-id') || $parent.data('product-id') || $parent.attr('data-post-id');
+                        if (id) {
+                            productId = parseInt(id);
+                            return false; // break
+                        }
+                    });
+                }
+                
+                // Fallback: try regex on URL
+                if (!productId) {
+                    var idMatch = url.match(/[?&]p=(\d+)|\/(\d+)\/?$/);
+                    if (idMatch) {
+                        productId = parseInt(idMatch[1] || idMatch[2]);
+                    }
+                }
+            }
+            
+            console.log('[PAM FiboSearch] Checking details panel product ID:', productId, 'Restricted?', productId && pamRestrictedProducts.indexOf(productId) !== -1);
+            
+            if (productId && pamRestrictedProducts.indexOf(productId) !== -1) {
+                console.log('[PAM FiboSearch] REMOVING details panel product:', productId);
+                $item.remove();
+                filteredProducts++;
+            }
+        });
+        
         console.log('[PAM FiboSearch] Filtered', filteredProducts, 'products and', filteredBrands, 'brands');
         
-        // 3. Remove empty groups
+        // 4. Remove empty groups
         $('.dgwt-wcas-suggestion-group').each(function() {
             var $group = $(this);
             if ($group.find('.dgwt-wcas-suggestion:visible, .dgwt-wcas-st:visible').length === 0) {
