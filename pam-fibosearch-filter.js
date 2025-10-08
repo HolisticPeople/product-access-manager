@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.1.0
+ * Version: 2.1.1
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -63,6 +63,11 @@
         $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp').each(function() {
             var $item = $(this);
             
+            // Skip if already removed
+            if ($item.data('pam-removed')) {
+                return;
+            }
+            
             // Skip taxonomy items
             if ($item.hasClass('dgwt-wcas-suggestion-taxonomy') || $item.closest('.dgwt-wcas-suggestion-taxonomy').length) {
                 return;
@@ -83,6 +88,7 @@
             
             if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
                 console.log('[PAM FiboSearch] REMOVING product:', productId);
+                $item.data('pam-removed', true); // Mark as removed
                 $item.remove();
                 filteredProducts++;
             }
@@ -115,6 +121,7 @@
                 var brand = pamRestrictedBrands[i].toLowerCase();
                 if (text.indexOf(brand) !== -1) {
                     console.log('[PAM FiboSearch] REMOVING brand:', text, 'matches', pamRestrictedBrands[i]);
+                    $item.data('pam-removed', true); // Mark as removed
                     $item.remove();
                     filteredBrands++;
                     break;
@@ -125,6 +132,11 @@
         // 3. Filter RIGHT PANEL details (product cards that appear on hover/selection)
         $('.dgwt-wcas-details-inner-product, .dgwt-wcas-details-inner[data-post-type="product"]').each(function() {
             var $item = $(this);
+            
+            // Skip if already removed
+            if ($item.data('pam-removed')) {
+                return;
+            }
             
             // Try to get product ID from URL in the details panel
             var productId = null;
@@ -159,6 +171,7 @@
             
             if (productId && pamRestrictedProducts.indexOf(productId) !== -1) {
                 console.log('[PAM FiboSearch] REMOVING details panel product:', productId);
+                $item.data('pam-removed', true); // Mark as removed
                 $item.remove();
                 filteredProducts++;
             }
@@ -193,9 +206,13 @@
         });
         
         // Backup filter trigger - run after AJAX completes
+        // Run multiple times with delays to catch FiboSearch re-renders
         $(document).ajaxComplete(function(event, xhr, settings) {
             if (settings.url && (settings.url.indexOf('dgwt_wcas') !== -1 || settings.url.indexOf('action=dgwt') !== -1)) {
-                setTimeout(pamFilterFiboResults, 100);
+                pamFilterFiboResults(); // Immediate
+                setTimeout(pamFilterFiboResults, 50);  // After 50ms
+                setTimeout(pamFilterFiboResults, 150); // After 150ms
+                setTimeout(pamFilterFiboResults, 300); // After 300ms
             }
         });
     });
