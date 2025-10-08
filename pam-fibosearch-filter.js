@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.1.3
+ * Version: 2.1.5
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -28,16 +28,20 @@
             data: {
                 action: 'pam_get_restricted_data'
             },
-            success: function(response) {
-                console.log('[PAM FiboSearch] AJAX response:', response);
-                if (response.success) {
-                    pamRestrictedProducts = response.data.products || [];
-                    pamRestrictedBrands = response.data.brands || [];
-                    console.log('[PAM FiboSearch] Restricted products:', pamRestrictedProducts.length);
-                    console.log('[PAM FiboSearch] Restricted brands:', pamRestrictedBrands);
-                }
-                pamIsLoading = false;
-            },
+        success: function(response) {
+            console.log('[PAM FiboSearch] AJAX response:', response);
+            if (response.success) {
+                pamRestrictedProducts = response.data.products || [];
+                pamRestrictedBrands = response.data.brands || [];
+                console.log('[PAM FiboSearch] Restricted products:', pamRestrictedProducts.length);
+                console.log('[PAM FiboSearch] Restricted brands:', pamRestrictedBrands);
+                
+                // CRITICAL: Trigger filter after data loads!
+                console.log('[PAM FiboSearch] Data loaded - triggering immediate filter');
+                pamFilterFiboResults();
+            }
+            pamIsLoading = false;
+        },
             error: function(xhr, status, error) {
                 console.error('[PAM FiboSearch] AJAX error:', error, xhr.responseText);
                 pamRestrictedProducts = [];
