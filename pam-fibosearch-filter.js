@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.1.5
+ * Version: 2.1.6
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -148,51 +148,54 @@
             }
         });
         
-        // 3. Filter RIGHT PANEL details (product cards that appear on hover/selection)
-        $('.dgwt-wcas-details-inner-product, .dgwt-wcas-details-inner[data-post-type="product"]').each(function() {
-            var $item = $(this);
+        // 3. Filter RIGHT PANEL details (simpler approach - check all detail items)
+        $('.dgwt-wcas-details-wrapp .dgwt-wcas-details-inner').each(function() {
+            var $detailsInner = $(this);
             
             // Skip if already removed
-            if ($item.data('pam-removed')) {
+            if ($detailsInner.data('pam-removed')) {
                 return;
             }
             
-            // Try to get product ID from URL in the details panel
-            var productId = null;
-            var $link = $item.find('a[href*="/product/"]').first();
+            // Find all links in this details panel
+            var $productLinks = $detailsInner.find('a[href*="/product/"]');
+            var shouldRemove = false;
             
-            if ($link.length) {
-                var url = $link.attr('href') || '';
-                var match = url.match(/\/product\/([^\/]+)\//);
-                if (match) {
-                    // Extract product slug and find ID from data attributes
-                    var $allLinks = $('.dgwt-wcas-suggestion a[href*="' + match[0] + '"]');
-                    $allLinks.each(function() {
-                        var $parent = $(this).closest('.dgwt-wcas-suggestion');
-                        var id = $parent.data('post-id') || $parent.data('product-id') || $parent.attr('data-post-id');
-                        if (id) {
-                            productId = parseInt(id);
+            $productLinks.each(function() {
+                var url = $(this).attr('href') || '';
+                
+                // Try to match product slug with left panel items
+                $('.dgwt-wcas-suggestion').each(function() {
+                    var $suggestion = $(this);
+                    var $suggestionLink = $suggestion.find('a').first();
+                    var suggestionUrl = $suggestionLink.attr('href') || '';
+                    
+                    // If URLs match, check if this suggestion is restricted
+                    if (suggestionUrl && url.indexOf(suggestionUrl) !== -1) {
+                        var productId = $suggestion.data('post-id') || $suggestion.data('product-id') || $suggestion.attr('data-post-id');
+                        if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
+                            shouldRemove = true;
+                            console.log('[PAM FiboSearch] RIGHT PANEL: Found restricted product', productId, 'via URL match');
                             return false; // break
                         }
-                    });
-                }
-                
-                // Fallback: try regex on URL
-                if (!productId) {
-                    var idMatch = url.match(/[?&]p=(\d+)|\/(\d+)\/?$/);
-                    if (idMatch) {
-                        productId = parseInt(idMatch[1] || idMatch[2]);
                     }
+                });
+                
+                if (shouldRemove) {
+                    return false; // break outer loop
                 }
-            }
+            });
             
-            console.log('[PAM FiboSearch] Checking details panel product ID:', productId, 'Restricted?', productId && pamRestrictedProducts.indexOf(productId) !== -1);
-            
-            if (productId && pamRestrictedProducts.indexOf(productId) !== -1) {
-                console.log('[PAM FiboSearch] REMOVING details panel product:', productId);
-                $item.data('pam-removed', true); // Mark as removed
-                $item.remove();
-                filteredProducts++;
+            if (shouldRemove) {
+                console.log('[PAM FiboSearch] REMOVING right panel details');
+                $detailsInner.data('pam-removed', true);
+                $detailsInner.remove();
+                
+                // Also try to hide the entire details wrapper if it's empty
+                var $detailsWrapp = $('.dgwt-wcas-details-wrapp');
+                if ($detailsWrapp.find('.dgwt-wcas-details-inner:visible').length === 0) {
+                    $detailsWrapp.hide();
+                }
             }
         });
         
