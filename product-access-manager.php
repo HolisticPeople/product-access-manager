@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Products in restricted catalogs are hidden by default, revealed to authorized users.
- * Version: 2.0.2
+ * Version: 2.0.3
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.0.2' );
+define( 'PAM_VERSION', '2.0.3' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -77,13 +77,12 @@ add_action( 'init', function () {
  * Runs early on plugins_loaded to ensure filters are active during AJAX
  */
 add_action( 'plugins_loaded', function () {
-    // FiboSearch integration - Prevent indexing of hidden products
-    add_filter( 'dgwt/wcas/tnt/indexer/product/should_index', 'pam_fibo_should_index_product', 10, 2 );
+    // NOTE: We do NOT prevent indexing because authorized users need to search too!
     
-    // Server-side filter (runs during full WordPress load)
+    // Server-side filter (runs during full WordPress load - won't work in SHORTINIT)
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_product', 10, 2 );
     
-    // Client-side filtering (backup for SHORTINIT mode)
+    // Client-side filtering (PRIMARY method for FiboSearch due to SHORTINIT mode)
     add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
     add_action( 'wp_ajax_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
     add_action( 'wp_ajax_nopriv_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
@@ -366,32 +365,13 @@ function pam_modify_query( $query ) {
 // ============================================================================
 
 /**
- * Prevent FiboSearch from indexing hidden products
- * This runs during indexing (full WordPress load)
+ * NOTE: We do NOT exclude products from FiboSearch index
+ * Because then authorized users couldn't search for them either!
  * 
- * @param bool $should_index Whether to index the product
- * @param int $product_id Product ID
- * @return bool Modified indexing decision
+ * Instead, we let FiboSearch index everything and filter via:
+ * 1. Server-side filters for normal page loads
+ * 2. Client-side JS for FiboSearch AJAX (SHORTINIT mode)
  */
-function pam_fibo_should_index_product( $should_index, $product_id ) {
-    if ( ! $should_index ) {
-        return false; // Already excluded by FiboSearch
-    }
-    
-    $product = wc_get_product( $product_id );
-    if ( ! $product ) {
-        return false;
-    }
-    
-    // Check if product is hidden in WooCommerce
-    $visibility = $product->get_catalog_visibility();
-    if ( $visibility === 'hidden' ) {
-        pam_log( 'FiboSearch Indexer: Excluding hidden product ' . $product_id . ' from index' );
-        return false; // Don't index hidden products
-    }
-    
-    return $should_index;
-}
 
 /**
  * Filter FiboSearch product suggestions - hide restricted products from unauthorized users
