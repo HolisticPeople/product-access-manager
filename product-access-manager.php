@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Products in restricted catalogs are hidden by default, revealed to authorized users.
- * Version: 2.0.1
+ * Version: 2.0.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.0.1' );
+define( 'PAM_VERSION', '2.0.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -77,7 +77,10 @@ add_action( 'init', function () {
  * Runs early on plugins_loaded to ensure filters are active during AJAX
  */
 add_action( 'plugins_loaded', function () {
-    // FiboSearch integration - Server-side filter (runs during full WordPress load)
+    // FiboSearch integration - Prevent indexing of hidden products
+    add_filter( 'dgwt/wcas/tnt/indexer/product/should_index', 'pam_fibo_should_index_product', 10, 2 );
+    
+    // Server-side filter (runs during full WordPress load)
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_product', 10, 2 );
     
     // Client-side filtering (backup for SHORTINIT mode)
@@ -361,6 +364,34 @@ function pam_modify_query( $query ) {
 // ============================================================================
 // FIBOSEARCH INTEGRATION
 // ============================================================================
+
+/**
+ * Prevent FiboSearch from indexing hidden products
+ * This runs during indexing (full WordPress load)
+ * 
+ * @param bool $should_index Whether to index the product
+ * @param int $product_id Product ID
+ * @return bool Modified indexing decision
+ */
+function pam_fibo_should_index_product( $should_index, $product_id ) {
+    if ( ! $should_index ) {
+        return false; // Already excluded by FiboSearch
+    }
+    
+    $product = wc_get_product( $product_id );
+    if ( ! $product ) {
+        return false;
+    }
+    
+    // Check if product is hidden in WooCommerce
+    $visibility = $product->get_catalog_visibility();
+    if ( $visibility === 'hidden' ) {
+        pam_log( 'FiboSearch Indexer: Excluding hidden product ' . $product_id . ' from index' );
+        return false; // Don't index hidden products
+    }
+    
+    return $should_index;
+}
 
 /**
  * Filter FiboSearch product suggestions - hide restricted products from unauthorized users
