@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Products in restricted catalogs are hidden by default, revealed to authorized users.
- * Version: 2.0.0
+ * Version: 2.0.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.0.0' );
+define( 'PAM_VERSION', '2.0.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -77,8 +77,13 @@ add_action( 'init', function () {
  * Runs early on plugins_loaded to ensure filters are active during AJAX
  */
 add_action( 'plugins_loaded', function () {
-    // FiboSearch integration - Filter search results
+    // FiboSearch integration - Server-side filter (runs during full WordPress load)
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_product', 10, 2 );
+    
+    // Client-side filtering (backup for SHORTINIT mode)
+    add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
+    add_action( 'wp_ajax_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
+    add_action( 'wp_ajax_nopriv_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
     
     pam_log( 'FiboSearch hooks registered' );
 }, 5 );
@@ -287,12 +292,12 @@ function pam_modify_query( $query ) {
     if ( current_user_can( 'manage_woocommerce' ) ) {
         return;
     }
-    
+
     // Skip if not main query or not shop/archive
     if ( ! $query->is_main_query() || ! ( $query->is_shop() || $query->is_product_taxonomy() || $query->is_search() ) ) {
         return;
     }
-    
+
     // Skip if not product query
     $post_types = $query->get( 'post_type' );
     if ( ! empty( $post_types ) && ! in_array( 'product', (array) $post_types, true ) ) {
@@ -414,4 +419,87 @@ function pam_get_restricted_product_ids() {
     }
     
     return $restricted;
+}
+
+// ============================================================================
+// FIBOSEARCH CLIENT-SIDE FILTERING (For SHORTINIT Mode)
+// ============================================================================
+
+/**
+ * Enqueue FiboSearch filtering JavaScript
+ */
+function pam_enqueue_fibo_filter_script() {
+    wp_enqueue_script(
+        'pam-fibosearch-filter',
+        plugins_url( 'pam-fibosearch-filter.js', __FILE__ ),
+        array( 'jquery' ),
+        PAM_VERSION,
+        true
+    );
+    
+    wp_localize_script( 'pam-fibosearch-filter', 'pamFiboFilter', array(
+        'ajaxUrl' => admin_url( 'admin-ajax.php' )
+    ) );
+    
+    pam_log( 'FiboSearch filter script enqueued' );
+}
+
+/**
+ * AJAX handler: Get restricted products and brands for current user
+ */
+function pam_ajax_get_restricted_data() {
+    // Clean output buffer to prevent PHP notices from breaking JSON
+    while ( ob_get_level() > 0 ) {
+        ob_end_clean();
+    }
+    ob_start();
+    
+    $restricted_products = pam_get_restricted_product_ids();
+    $restricted_brands = pam_get_restricted_brand_names();
+    
+    wp_send_json_success( array(
+        'products' => $restricted_products,
+        'brands' => $restricted_brands,
+    ) );
+}
+
+/**
+ * Get restricted brand names for current user
+ * 
+ * @return array Array of brand names that current user cannot see
+ */
+function pam_get_restricted_brand_names() {
+    if ( pam_user_has_full_access() ) {
+        return [];
+    }
+    
+    // Get all possible catalog values
+    $all_catalogs = array( 'Vimergy_catalog', 'DCG_catalog', 'HP_catalog' );
+    
+    // Get user's accessible catalogs
+    $accessible_catalogs = [];
+    if ( is_user_logged_in() ) {
+        $user = wp_get_current_user();
+        foreach ( $user->roles as $role ) {
+            if ( strpos( $role, 'access-' ) === 0 ) {
+                // Convert role to catalog
+                // "access-vimergy-user" → "Vimergy_catalog"
+                $brand = str_replace( array( 'access-', '-user' ), '', $role );
+                $accessible_catalogs[] = ucfirst( $brand ) . '_catalog';
+            }
+        }
+    }
+    
+    // Get restricted catalogs (ones user can't access)
+    $restricted_catalogs = array_diff( $all_catalogs, $accessible_catalogs );
+    
+    // Convert to brand names for display filtering
+    $restricted_brands = [];
+    foreach ( $restricted_catalogs as $catalog ) {
+        // "Vimergy_catalog" → "Vimergy"
+        $brand = str_replace( '_catalog', '', $catalog );
+        $restricted_brands[] = $brand;
+    }
+    
+    return $restricted_brands;
 }
