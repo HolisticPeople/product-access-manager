@@ -35,11 +35,26 @@
         }
     });
     
+    // Debounce timer to prevent excessive filtering
+    let filterTimer = null;
+    
     // Watch for FiboSearch results
     const observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
             if (mutation.addedNodes.length) {
+                // Clear existing timer
+                if (filterTimer) {
+                    clearTimeout(filterTimer);
+                }
+                
+                // Filter immediately
                 filterResults();
+                
+                // Also filter after a delay (in case more content loads)
+                filterTimer = setTimeout(function() {
+                    console.log('[PAM FiboSearch] Running delayed filter...');
+                    filterResults();
+                }, 300);
             }
         });
     });
@@ -75,13 +90,19 @@
         // Filter products - try multiple selectors
         $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion[data-post-type="product"]').each(function() {
             const $item = $(this);
+            
+            // Skip if already hidden
+            if ($item.attr('data-pam-hidden')) {
+                return;
+            }
+            
             const productId = parseInt($item.attr('data-product-id') || $item.attr('data-post-id') || $item.data('post-id') || 0);
             
             console.log('[PAM FiboSearch] Checking product:', productId, 'Restricted?', restrictedProducts.includes(productId));
             
             if (productId && restrictedProducts.includes(productId)) {
-                console.log('[PAM FiboSearch] REMOVING product:', productId);
-                $item.remove();
+                console.log('[PAM FiboSearch] HIDING product:', productId);
+                $item.hide().attr('data-pam-hidden', 'true');
                 productsFiltered++;
             }
         });
@@ -89,6 +110,12 @@
         // Filter brand/tag taxonomy items - try multiple approaches
         $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-suggestion[data-taxonomy], .dgwt-wcas-suggestion').each(function() {
             const $item = $(this);
+            
+            // Skip if already hidden
+            if ($item.attr('data-pam-hidden')) {
+                return;
+            }
+            
             const text = $item.text().toLowerCase();
             const dataType = $item.attr('data-post-type') || $item.attr('data-taxonomy') || '';
             
@@ -100,8 +127,8 @@
             // Check if this is a restricted brand
             for (let i = 0; i < restrictedBrands.length; i++) {
                 if (text.includes(restrictedBrands[i].toLowerCase())) {
-                    console.log('[PAM FiboSearch] REMOVING brand/tag:', text, 'matches', restrictedBrands[i]);
-                    $item.remove();
+                    console.log('[PAM FiboSearch] HIDING brand/tag:', text, 'matches', restrictedBrands[i]);
+                    $item.hide().attr('data-pam-hidden', 'true');
                     brandsFiltered++;
                     break;
                 }
