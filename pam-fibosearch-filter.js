@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.0.1
+ * Version: 2.0.4
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -12,6 +12,8 @@
     let restrictedProducts = [];
     let restrictedBrands = [];
     
+    console.log('[PAM FiboSearch] Script loaded, AJAX URL:', pamFiboFilter.ajaxUrl);
+    
     // Fetch restricted products for current user
     $.ajax({
         url: pamFiboFilter.ajaxUrl,
@@ -20,10 +22,16 @@
             action: 'pam_get_restricted_data'
         },
         success: function(response) {
+            console.log('[PAM FiboSearch] AJAX response:', response);
             if (response.success) {
                 restrictedProducts = response.data.products || [];
                 restrictedBrands = response.data.brands || [];
+                console.log('[PAM FiboSearch] Restricted products:', restrictedProducts.length);
+                console.log('[PAM FiboSearch] Restricted brands:', restrictedBrands);
             }
+        },
+        error: function(xhr, status, error) {
+            console.error('[PAM FiboSearch] AJAX error:', error, xhr.responseText);
         }
     });
     
@@ -51,6 +59,13 @@
             return;
         }
         
+        console.log('[PAM FiboSearch] Filtering results...');
+        console.log('[PAM FiboSearch] Restricted products count:', restrictedProducts.length);
+        console.log('[PAM FiboSearch] Restricted brands:', restrictedBrands);
+        
+        let productsFiltered = 0;
+        let brandsFiltered = 0;
+        
         // Filter products
         $('.dgwt-wcas-suggestion-product').each(function() {
             const $item = $(this);
@@ -58,6 +73,7 @@
             
             if (productId && restrictedProducts.includes(productId)) {
                 $item.remove();
+                productsFiltered++;
             }
         });
         
@@ -70,10 +86,13 @@
             for (let i = 0; i < restrictedBrands.length; i++) {
                 if (text.includes(restrictedBrands[i].toLowerCase())) {
                     $item.remove();
+                    brandsFiltered++;
                     break;
                 }
             }
         });
+        
+        console.log('[PAM FiboSearch] Filtered', productsFiltered, 'products and', brandsFiltered, 'brands/tags');
         
         // Hide empty sections
         $('.dgwt-wcas-suggestions').each(function() {
