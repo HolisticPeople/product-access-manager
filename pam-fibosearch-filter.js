@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.0.8
+ * Version: 2.0.9
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -59,8 +59,8 @@
         
         console.log('[PAM FiboSearch] Starting filter - restricted products:', pamRestrictedProducts.length, 'restricted brands:', pamRestrictedBrands);
         
-        // 1. Filter product suggestions - comprehensive selectors from v1.9.0
-        $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp, .dgwt-wcas-details-inner-product').each(function() {
+        // 1. Filter product suggestions - exact selectors from v1.9.0
+        $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp').each(function() {
             var $item = $(this);
             
             // Skip taxonomy items
@@ -68,15 +68,9 @@
                 return;
             }
             
-            // Try multiple methods to get product ID (from v1.9.0)
-            var productId = $item.data('post-id') || 
-                           $item.data('product-id') || 
-                           $item.attr('data-post-id') || 
-                           $item.attr('data-product-id') ||
-                           $item.attr('data-object') ||  // NEW: FiboSearch uses data-object!
-                           $item.data('object');
+            // Get product ID - exact logic from v1.9.0
+            var productId = $item.data('post-id') || $item.data('product-id') || $item.attr('data-post-id') || $item.attr('data-product-id');
             
-            // If still no ID, try parsing from URL
             if (!productId) {
                 var url = $item.find('a').first().attr('href') || '';
                 var match = url.match(/[?&]p=(\d+)|\/product\/[^\/]+\/(\d+)|post_type=product.*?(\d+)/);
@@ -85,24 +79,24 @@
                 }
             }
             
-            productId = parseInt(productId);
+            console.log('[PAM FiboSearch] Checking product ID:', productId, 'Restricted?', pamRestrictedProducts.indexOf(parseInt(productId)) !== -1);
             
-            console.log('[PAM FiboSearch] Checking product ID:', productId, 'Restricted?', pamRestrictedProducts.indexOf(productId) !== -1);
-            
-            if (productId && pamRestrictedProducts.indexOf(productId) !== -1) {
+            if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
                 console.log('[PAM FiboSearch] REMOVING product:', productId);
                 $item.remove();
                 filteredProducts++;
             }
         });
         
-        // 2. Filter taxonomy suggestions (brands/tags)
+        // 2. Filter taxonomy suggestions (brands/tags) - exact selectors from v1.9.0
         var taxonomySelectors = [
             '.dgwt-wcas-suggestion-taxonomy',
             '.dgwt-wcas-st',
             '.js-dgwt-wcas-suggestion',
+            '.dgwt-wcas-suggestion',
             'li[class*="taxonomy"]',
-            'li[class*="brand"]'
+            'li[class*="brand"]',
+            '.dgwt-wcas-suggestions-wrapp li'
         ];
         
         $(taxonomySelectors.join(', ')).each(function() {
