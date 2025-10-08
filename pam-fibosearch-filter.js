@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.0.7
+ * Version: 2.0.8
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -63,11 +63,6 @@
         $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp, .dgwt-wcas-details-inner-product').each(function() {
             var $item = $(this);
             
-            // Skip if already processed
-            if ($item.data('pam-processed')) {
-                return;
-            }
-            
             // Skip taxonomy items
             if ($item.hasClass('dgwt-wcas-suggestion-taxonomy') || $item.closest('.dgwt-wcas-suggestion-taxonomy').length) {
                 return;
@@ -95,9 +90,8 @@
             console.log('[PAM FiboSearch] Checking product ID:', productId, 'Restricted?', pamRestrictedProducts.indexOf(productId) !== -1);
             
             if (productId && pamRestrictedProducts.indexOf(productId) !== -1) {
-                console.log('[PAM FiboSearch] HIDING product:', productId);
-                $item.hide();
-                $item.data('pam-processed', true);
+                console.log('[PAM FiboSearch] REMOVING product:', productId);
+                $item.remove();
                 filteredProducts++;
             }
         });
@@ -126,8 +120,8 @@
             for (var i = 0; i < pamRestrictedBrands.length; i++) {
                 var brand = pamRestrictedBrands[i].toLowerCase();
                 if (text.indexOf(brand) !== -1) {
-                    console.log('[PAM FiboSearch] HIDING brand:', text, 'matches', pamRestrictedBrands[i]);
-                    $item.hide();
+                    console.log('[PAM FiboSearch] REMOVING brand:', text, 'matches', pamRestrictedBrands[i]);
+                    $item.remove();
                     filteredBrands++;
                     break;
                 }
