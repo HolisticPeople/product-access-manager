@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Products in restricted catalogs are hidden by default, revealed to authorized users.
- * Version: 2.1.6
+ * Version: 2.1.7
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.1.6' );
+define( 'PAM_VERSION', '2.1.7' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -489,11 +489,18 @@ function pam_ajax_get_restricted_data() {
     }
     ob_start();
     
-    $restricted_products = pam_get_restricted_product_ids();
+    $restricted_product_ids = pam_get_restricted_product_ids();
     $restricted_brands = pam_get_restricted_brand_names();
     
+    // Get product URLs for client-side matching
+    $restricted_product_urls = [];
+    foreach ( $restricted_product_ids as $product_id ) {
+        $restricted_product_urls[] = get_permalink( $product_id );
+    }
+    
     wp_send_json_success( array(
-        'products' => $restricted_products,
+        'products' => $restricted_product_ids,
+        'product_urls' => $restricted_product_urls,
         'brands' => $restricted_brands,
     ) );
 }

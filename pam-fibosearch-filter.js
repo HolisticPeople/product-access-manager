@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.1.6
+ * Version: 2.1.7
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -9,6 +9,7 @@
     'use strict';
     
     var pamRestrictedProducts = null;
+    var pamRestrictedProductUrls = [];
     var pamIsLoading = false;
     var pamRestrictedBrands = [];
     
@@ -32,8 +33,10 @@
             console.log('[PAM FiboSearch] AJAX response:', response);
             if (response.success) {
                 pamRestrictedProducts = response.data.products || [];
+                pamRestrictedProductUrls = response.data.product_urls || [];
                 pamRestrictedBrands = response.data.brands || [];
                 console.log('[PAM FiboSearch] Restricted products:', pamRestrictedProducts.length);
+                console.log('[PAM FiboSearch] Restricted product URLs:', pamRestrictedProductUrls.length);
                 console.log('[PAM FiboSearch] Restricted brands:', pamRestrictedBrands);
                 
                 // CRITICAL: Trigger filter after data loads!
@@ -45,6 +48,7 @@
             error: function(xhr, status, error) {
                 console.error('[PAM FiboSearch] AJAX error:', error, xhr.responseText);
                 pamRestrictedProducts = [];
+                pamRestrictedProductUrls = [];
                 pamRestrictedBrands = [];
                 pamIsLoading = false;
             }
@@ -148,7 +152,7 @@
             }
         });
         
-        // 3. Filter RIGHT PANEL details (simpler approach - check all detail items)
+        // 3. Filter RIGHT PANEL details - match URLs directly with restricted product URLs
         $('.dgwt-wcas-details-wrapp .dgwt-wcas-details-inner').each(function() {
             var $detailsInner = $(this);
             
@@ -157,29 +161,29 @@
                 return;
             }
             
-            // Find all links in this details panel
+            // Find product links in the details panel
             var $productLinks = $detailsInner.find('a[href*="/product/"]');
             var shouldRemove = false;
             
+            // Check if any link in the details panel matches a restricted product URL
             $productLinks.each(function() {
                 var url = $(this).attr('href') || '';
                 
-                // Try to match product slug with left panel items
-                $('.dgwt-wcas-suggestion').each(function() {
-                    var $suggestion = $(this);
-                    var $suggestionLink = $suggestion.find('a').first();
-                    var suggestionUrl = $suggestionLink.attr('href') || '';
+                // Normalize URLs for comparison (remove trailing slash, query params, etc.)
+                var normalizedUrl = url.split('?')[0].replace(/\/$/, '');
+                
+                console.log('[PAM FiboSearch] RIGHT PANEL: Checking URL:', normalizedUrl);
+                
+                // Check if this URL matches any restricted product URL
+                for (var i = 0; i < pamRestrictedProductUrls.length; i++) {
+                    var restrictedUrl = pamRestrictedProductUrls[i].split('?')[0].replace(/\/$/, '');
                     
-                    // If URLs match, check if this suggestion is restricted
-                    if (suggestionUrl && url.indexOf(suggestionUrl) !== -1) {
-                        var productId = $suggestion.data('post-id') || $suggestion.data('product-id') || $suggestion.attr('data-post-id');
-                        if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
-                            shouldRemove = true;
-                            console.log('[PAM FiboSearch] RIGHT PANEL: Found restricted product', productId, 'via URL match');
-                            return false; // break
-                        }
+                    if (normalizedUrl === restrictedUrl) {
+                        shouldRemove = true;
+                        console.log('[PAM FiboSearch] RIGHT PANEL: URL matches restricted product:', restrictedUrl);
+                        return false; // break
                     }
-                });
+                }
                 
                 if (shouldRemove) {
                     return false; // break outer loop
@@ -191,7 +195,7 @@
                 $detailsInner.data('pam-removed', true);
                 $detailsInner.remove();
                 
-                // Also try to hide the entire details wrapper if it's empty
+                // Also hide the entire details wrapper if it's empty
                 var $detailsWrapp = $('.dgwt-wcas-details-wrapp');
                 if ($detailsWrapp.find('.dgwt-wcas-details-inner:visible').length === 0) {
                     $detailsWrapp.hide();
