@@ -66,25 +66,41 @@
         let productsFiltered = 0;
         let brandsFiltered = 0;
         
-        // Filter products
-        $('.dgwt-wcas-suggestion-product').each(function() {
+        // Debug: Log what elements we find
+        const productElements = $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion[data-post-type="product"]');
+        const brandElements = $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-suggestion[data-taxonomy]');
+        console.log('[PAM FiboSearch] Found', productElements.length, 'product elements');
+        console.log('[PAM FiboSearch] Found', brandElements.length, 'brand/taxonomy elements');
+        
+        // Filter products - try multiple selectors
+        $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion[data-post-type="product"]').each(function() {
             const $item = $(this);
-            const productId = parseInt($item.attr('data-product-id') || $item.attr('data-post-id') || 0);
+            const productId = parseInt($item.attr('data-product-id') || $item.attr('data-post-id') || $item.data('post-id') || 0);
+            
+            console.log('[PAM FiboSearch] Checking product:', productId, 'Restricted?', restrictedProducts.includes(productId));
             
             if (productId && restrictedProducts.includes(productId)) {
+                console.log('[PAM FiboSearch] REMOVING product:', productId);
                 $item.remove();
                 productsFiltered++;
             }
         });
         
-        // Filter brand/tag taxonomy items
-        $('.dgwt-wcas-suggestion-taxonomy').each(function() {
+        // Filter brand/tag taxonomy items - try multiple approaches
+        $('.dgwt-wcas-suggestion-taxonomy, .dgwt-wcas-suggestion[data-taxonomy], .dgwt-wcas-suggestion').each(function() {
             const $item = $(this);
             const text = $item.text().toLowerCase();
+            const dataType = $item.attr('data-post-type') || $item.attr('data-taxonomy') || '';
+            
+            // Skip if it's a product
+            if (dataType === 'product') {
+                return;
+            }
             
             // Check if this is a restricted brand
             for (let i = 0; i < restrictedBrands.length; i++) {
                 if (text.includes(restrictedBrands[i].toLowerCase())) {
+                    console.log('[PAM FiboSearch] REMOVING brand/tag:', text, 'matches', restrictedBrands[i]);
                     $item.remove();
                     brandsFiltered++;
                     break;
