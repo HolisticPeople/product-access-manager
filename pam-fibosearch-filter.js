@@ -1,6 +1,6 @@
 /**
  * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.1.1
+ * Version: 2.1.2
  * 
  * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
  * which bypasses our server-side PHP filters.
@@ -73,11 +73,19 @@
                 return;
             }
             
+            // DEBUG: Log all attributes to see what's available
+            var attrs = {};
+            $.each($item[0].attributes, function(idx, attr) {
+                attrs[attr.nodeName] = attr.nodeValue;
+            });
+            console.log('[PAM FiboSearch] Product element attributes:', attrs);
+            
             // Get product ID - exact logic from v1.9.0
             var productId = $item.data('post-id') || $item.data('product-id') || $item.attr('data-post-id') || $item.attr('data-product-id');
             
             if (!productId) {
                 var url = $item.find('a').first().attr('href') || '';
+                console.log('[PAM FiboSearch] Product URL:', url);
                 var match = url.match(/[?&]p=(\d+)|\/product\/[^\/]+\/(\d+)|post_type=product.*?(\d+)/);
                 if (match) {
                     productId = parseInt(match[1] || match[2] || match[3]);
