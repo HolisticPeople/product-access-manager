@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control. Products in restricted catalogs are hidden by default, revealed to authorized users.
- * Version: 2.1.3
+ * Version: 2.1.4
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.1.3' );
+define( 'PAM_VERSION', '2.1.4' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -416,23 +416,42 @@ function pam_user_has_full_access() {
  */
 function pam_get_restricted_product_ids() {
     if ( pam_user_has_full_access() ) {
+        pam_log( 'User has full access - returning empty restricted list' );
         return [];
     }
     
-    // This is now less efficient but kept for backward compatibility
-    // In v2.0, we rely on ACF meta queries instead
+    // Get all products with site_catalog ACF field set
     $all_products = wc_get_products([
         'limit' => -1,
         'return' => 'ids',
         'status' => 'publish',
     ]);
     
+    pam_log( 'Checking ' . count( $all_products ) . ' total products for restrictions' );
+    
     $restricted = [];
+    $restricted_count_by_catalog = [];
+    
     foreach ( $all_products as $product_id ) {
         if ( ! pam_user_can_view( $product_id ) ) {
             $restricted[] = $product_id;
+            
+            // Debug: Count by catalog
+            if ( function_exists( 'get_field' ) ) {
+                $catalogs = get_field( 'site_catalog', $product_id );
+                if ( $catalogs ) {
+                    foreach ( (array) $catalogs as $catalog ) {
+                        if ( ! isset( $restricted_count_by_catalog[ $catalog ] ) ) {
+                            $restricted_count_by_catalog[ $catalog ] = 0;
+                        }
+                        $restricted_count_by_catalog[ $catalog ]++;
+                    }
+                }
+            }
         }
     }
+    
+    pam_log( 'Found ' . count( $restricted ) . ' restricted products. By catalog: ' . print_r( $restricted_count_by_catalog, true ) );
     
     return $restricted;
 }
