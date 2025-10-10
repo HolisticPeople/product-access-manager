@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.5.3
+ * Version: 2.5.4
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.5.3' );
+define( 'PAM_VERSION', '2.5.4' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -792,10 +792,20 @@ function pam_enqueue_fibo_filter_script() {
  * Uses 30-minute cache for performance!
  */
 function pam_ajax_get_blocked_products() {
+    // Clean output buffer to prevent PHP notices from breaking JSON
+    while ( ob_get_level() > 0 ) {
+        ob_end_clean();
+    }
+    ob_start();
+    
     // Get blocked products from cache (fast!)
     $blocked_products = pam_get_blocked_products_cached();
     
     pam_log( 'AJAX: Returning ' . count( $blocked_products ) . ' blocked products for filtering' );
     
+    // Clean any output before sending JSON
+    ob_end_clean();
+    
     wp_send_json_success( $blocked_products );
+    exit; // Ensure clean exit
 }
