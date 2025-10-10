@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.5.0
+ * Version: 2.5.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.5.0' );
+define( 'PAM_VERSION', '2.5.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -89,8 +89,10 @@ add_action( 'init', function () {
 add_action( 'plugins_loaded', function () {
     // NOTE: We do NOT prevent indexing because authorized users need to search too!
     
-    // Server-side filter using cached blocked products (works even in SHORTINIT mode)
-    add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_product', 10, 2 );
+    // Client-side filtering (works reliably even in SHORTINIT mode)
+    add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
+    add_action( 'wp_ajax_pam_get_blocked_products', 'pam_ajax_get_blocked_products' );
+    add_action( 'wp_ajax_nopriv_pam_get_blocked_products', 'pam_ajax_get_blocked_products' );
     
     pam_log( 'FiboSearch hooks registered' );
 }, 5 );
@@ -761,5 +763,39 @@ function pam_get_restricted_product_ids() {
 // FIBOSEARCH CLIENT-SIDE FILTERING (For SHORTINIT Mode)
 // ============================================================================
 
-// NOTE: Client-side FiboSearch filtering removed in v2.5.0
-// Now using server-side filtering with cached blocked products (much simpler and faster!)
+/**
+ * Enqueue FiboSearch filtering script
+ * 
+ * Lightweight client-side filter that uses cached blocked products endpoint.
+ * Required because FiboSearch runs in SHORTINIT mode (plugins don't load).
+ */
+function pam_enqueue_fibo_filter_script() {
+    wp_enqueue_script(
+        'pam-fibosearch-filter',
+        plugins_url( 'pam-fibosearch-filter.js', __FILE__ ),
+        array( 'jquery' ),
+        PAM_VERSION,
+        true
+    );
+    
+    wp_localize_script( 'pam-fibosearch-filter', 'pamFiboFilter', array(
+        'ajaxUrl' => admin_url( 'admin-ajax.php' )
+    ) );
+    
+    pam_log( 'FiboSearch filter script enqueued v' . PAM_VERSION );
+}
+
+/**
+ * AJAX handler: Get blocked products for current user
+ * 
+ * Returns array of product IDs that should be hidden from current user.
+ * Uses 30-minute cache for performance!
+ */
+function pam_ajax_get_blocked_products() {
+    // Get blocked products from cache (fast!)
+    $blocked_products = pam_get_blocked_products_cached();
+    
+    pam_log( 'AJAX: Returning ' . count( $blocked_products ) . ' blocked products for filtering' );
+    
+    wp_send_json_success( $blocked_products );
+}
