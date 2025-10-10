@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.6.5
+ * Version: 2.6.6
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.6.5' );
+define( 'PAM_VERSION', '2.6.6' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -828,6 +828,12 @@ function pam_enqueue_fibo_filter_script() {
     // Skip for admins - they should see all products
     if ( current_user_can( 'manage_woocommerce' ) ) {
         pam_log( 'FiboSearch filter NOT enqueued - user is admin' );
+        return;
+    }
+    
+    // Skip for authorized users with access roles - they should see their catalog products
+    if ( is_user_logged_in() && pam_user_has_any_access_role( get_current_user_id() ) ) {
+        pam_log( 'FiboSearch filter NOT enqueued - user has access role' );
         return;
     }
     
