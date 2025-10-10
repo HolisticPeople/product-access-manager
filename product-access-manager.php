@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.7.2
+ * Version: 2.8.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.7.2' );
+define( 'PAM_VERSION', '2.8.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -383,8 +383,8 @@ function pam_calculate_blocked_products( $user_id ) {
  */
 function pam_user_has_any_access_role( $user_id ) {
     if ( ! $user_id ) {
-            return false;
-        }
+        return false;
+    }
     $user = get_userdata( $user_id );
     if ( ! $user ) {
         return false;
@@ -411,152 +411,41 @@ function pam_clear_blocked_products_cache( $user_id = null ) {
         pam_log( 'Cleared cache for guests' );
     }
     
-    // Always clear Product Slider Pro cache (it doesn't differentiate users in cache keys)
-    // This ensures authorized users see their products immediately after login
-    pam_clear_slider_transients();
+    // Note: We no longer clear slider cache - sliders never show restricted products for anyone
+    // The slider cache is the same for all users (no restricted products) so it can be shared safely
 }
 
 /**
  * Clear Product Slider Pro transients
  * 
- * The slider caches its HTML output in transients with keys like 'spwps_HASH'.
- * We create user-aware versions with suffixes like '_guest', '_vimergy', etc.
+ * This function is available for manual use but not called automatically.
+ * Sliders now work with their natural cache since they never show restricted products to anyone.
  */
 function pam_clear_slider_transients() {
     global $wpdb;
     
-    // Delete all slider transients (all user types)
+    // Delete all slider transients
     $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_spwps_%'" );
     $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_timeout_spwps_%'" );
     
-    pam_log( 'Cleared ALL slider transients (all user access types)' );
+    pam_log( 'Manually cleared all slider transients' );
 }
 
 // ============================================================================
-// SLIDER CACHE: USER-AWARE TRANSIENTS
+// SLIDER BEHAVIOR
 // ============================================================================
 
 /**
- * Make slider cache user-aware by intercepting transient operations
+ * Simplified Slider Approach (v2.8.0+)
  * 
- * The slider plugin caches HTML in transients without considering user roles.
- * We intercept get/set operations and add user-specific suffixes to cache keys.
+ * Sliders NEVER show restricted products - even to authorized users.
+ * This simplifies caching and eliminates cross-user contamination issues.
  * 
- * Cache key examples:
- * - spwps_abc123_guest (no access)
- * - spwps_abc123_vimergy (access-vimergy-user role)
- * - spwps_abc123_gaia (access-gaia-user role)
- * - spwps_abc123_gaia_vimergy (both roles, sorted alphabetically)
- * - spwps_abc123_admin (admin, sees everything)
+ * - Slider cache works normally (good performance)
+ * - wc_get_products() filter excludes ALL restricted products for non-admins
+ * - Authorized users see their restricted products on shop/search/FiboSearch (not sliders)
+ * - One shared slider cache for all users (safe because no restricted products shown)
  */
-
-/**
- * Intercept slider transient GET operations
- */
-function pam_get_user_aware_slider_transient( $pre_transient, $transient ) {
-    // Get user-specific cache key
-    $user_suffix = pam_get_user_cache_suffix();
-    $user_transient = $transient . $user_suffix;
-    
-    // Try to get user-specific cache from database directly
-    $user_value = get_option( '_transient_' . $user_transient );
-    
-    if ( $user_value !== false ) {
-        pam_log( 'Slider cache HIT for: ' . $transient . $user_suffix );
-        return $user_value;
-    }
-    
-    pam_log( 'Slider cache MISS for: ' . $transient . $user_suffix );
-    // Return false to let slider build cache normally
-    return false;
-}
-
-/**
- * Intercept slider transient SET operations
- */
-function pam_set_user_aware_slider_transient( $value, $expiration, $transient ) {
-    // Get user-specific cache key
-    $user_suffix = pam_get_user_cache_suffix();
-    $user_transient = $transient . $user_suffix;
-    
-    // Save to user-specific transient
-    set_transient( $user_transient, $value, $expiration );
-    pam_log( 'Slider cache SAVED for: ' . $transient . $user_suffix );
-    
-    // Prevent saving to original key by returning false
-    return false;
-}
-
-// DISABLE slider caching entirely to prevent cross-user cache contamination
-// The slider caches HTML without user context, causing unauthorized users to see
-// cached HTML built for authorized users (and vice versa).
-// Our wc_get_products() filter already provides fast product filtering.
-add_filter( 'pre_transient', function( $value, $transient ) {
-    if ( strpos( $transient, 'spwps_' ) === 0 ) {
-        pam_log( 'Slider cache disabled for: ' . $transient );
-        // Return false to force cache miss - slider will rebuild every time
-        return false;
-    }
-    return $value;
-}, 10, 2 );
-
-add_filter( 'pre_set_transient', function( $value, $transient, $expiration ) {
-    if ( strpos( $transient, 'spwps_' ) === 0 ) {
-        pam_log( 'Slider cache save blocked for: ' . $transient );
-        // Return false to prevent caching - rely on wc_get_products filter instead
-        return false;
-    }
-    return $value;
-}, 10, 3 );
-
-/**
- * Get cache key suffix based on user's accessible catalogs
- * 
- * Creates unique suffix for each combination of catalog access:
- * - _guest (no access)
- * - _vimergy (has Vimergy access only)
- * - _gaia (has Gaia access only)  
- * - _gaia_vimergy (has both, alphabetically sorted)
- * - _admin (admin, sees all)
- * 
- * @return string Cache suffix like '_guest', '_vimergy', etc.
- */
-function pam_get_user_cache_suffix() {
-    // Admin users see everything
-    if ( current_user_can( 'manage_woocommerce' ) ) {
-        return '_admin';
-    }
-    
-    // For logged-in users, create suffix based on their accessible catalogs
-    if ( is_user_logged_in() ) {
-        $user_id = get_current_user_id();
-        $user = get_userdata( $user_id );
-        
-        if ( ! $user ) {
-            return '_guest';
-        }
-        
-        $accessible_brands = array();
-        foreach ( $user->roles as $role ) {
-            if ( strpos( $role, 'access-' ) === 0 ) {
-                // Convert role to brand name
-                // "access-vimergy-user" → "vimergy"
-                // "access-gaia-user" → "gaia"
-                $brand = str_replace( array( 'access-', '-user' ), '', $role );
-                $accessible_brands[] = strtolower( $brand );
-            }
-        }
-        
-        if ( ! empty( $accessible_brands ) ) {
-            // Sort for consistency: user with [vimergy, gaia] and [gaia, vimergy] get same cache
-            sort( $accessible_brands );
-            return '_' . implode( '_', $accessible_brands );
-        }
-    }
-    
-    // Guests and users without access roles
-    return '_guest';
-}
 
 /**
  * Clear cache on user login
@@ -1090,37 +979,72 @@ function pam_get_restricted_brand_names() {
  * @return array Modified query arguments with post__not_in exclusion
  */
 function pam_filter_wc_get_products( $wp_query_args, $query_vars ) {
-    // Skip for admins
+    // Skip for admins - they see everything
     if ( current_user_can( 'manage_woocommerce' ) ) {
         return $wp_query_args;
     }
     
-    // Prevent infinite recursion: Skip if we're inside pam_get_restricted_product_ids()
+    // Prevent infinite recursion: Skip if we're inside this function already
     if ( ! empty( $GLOBALS['pam_building_cache'] ) ) {
         return $wp_query_args;
     }
     
-    // Get blocked products from cache (same as shop/search queries)
-    $blocked_products = pam_get_blocked_products_cached();
+    // Static cache for this page load (performance optimization)
+    static $all_restricted_products = null;
     
-    if ( empty( $blocked_products ) ) {
+    if ( $all_restricted_products === null ) {
+        // For sliders: ALWAYS exclude ALL restricted products (even from authorized users)
+        // This simplifies caching and ensures sliders never show restricted products
+        $restricted_catalogs = pam_get_restricted_catalogs();
+        
+        if ( empty( $restricted_catalogs ) ) {
+            $all_restricted_products = [];
+            return $wp_query_args;
+        }
+        
+        // Get all products with restricted catalogs
+        $GLOBALS['pam_building_cache'] = true;
+        $all_products = wc_get_products([
+            'limit' => -1,
+            'return' => 'ids',
+            'status' => 'publish',
+        ]);
+        unset( $GLOBALS['pam_building_cache'] );
+        
+        $all_restricted_products = [];
+        foreach ( $all_products as $product_id ) {
+            $product_catalog = get_field( 'site_catalog', $product_id );
+            if ( $product_catalog ) {
+                $catalogs = is_array( $product_catalog ) ? $product_catalog : array( $product_catalog );
+                foreach ( $catalogs as $catalog ) {
+                    if ( in_array( $catalog, $restricted_catalogs, true ) ) {
+                        $all_restricted_products[] = $product_id;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        pam_log( 'wc_get_products(): Calculated ' . count( $all_restricted_products ) . ' restricted products to exclude from sliders' );
+    }
+    
+    if ( empty( $all_restricted_products ) ) {
         return $wp_query_args;
     }
     
     // Add exclusion to query arguments
     if ( isset( $wp_query_args['post__not_in'] ) ) {
-        // Merge with existing exclusions
         $wp_query_args['post__not_in'] = array_unique( 
             array_merge( 
                 (array) $wp_query_args['post__not_in'], 
-                $blocked_products 
+                $all_restricted_products 
             ) 
         );
     } else {
-        $wp_query_args['post__not_in'] = $blocked_products;
+        $wp_query_args['post__not_in'] = $all_restricted_products;
     }
     
-    pam_log( 'wc_get_products(): Excluded ' . count( $blocked_products ) . ' products' );
+    pam_log( 'wc_get_products(): Applied exclusion of ' . count( $all_restricted_products ) . ' restricted products' );
     
     return $wp_query_args;
 }
