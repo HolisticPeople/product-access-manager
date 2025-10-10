@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.7.0
+ * Version: 2.7.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.7.0' );
+define( 'PAM_VERSION', '2.7.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -383,8 +383,8 @@ function pam_calculate_blocked_products( $user_id ) {
  */
 function pam_user_has_any_access_role( $user_id ) {
     if ( ! $user_id ) {
-        return false;
-    }
+            return false;
+        }
     $user = get_userdata( $user_id );
     if ( ! $user ) {
         return false;
@@ -454,11 +454,6 @@ function pam_clear_slider_transients() {
  * Intercept slider transient GET operations
  */
 function pam_get_user_aware_slider_transient( $pre_transient, $transient ) {
-    // Only intercept slider transients
-    if ( strpos( $transient, 'spwps_' ) !== 0 ) {
-        return $pre_transient;
-    }
-    
     // Get user-specific cache key
     $user_suffix = pam_get_user_cache_suffix();
     $user_transient = $transient . $user_suffix;
@@ -467,37 +462,54 @@ function pam_get_user_aware_slider_transient( $pre_transient, $transient ) {
     $user_value = get_option( '_transient_' . $user_transient );
     
     if ( $user_value !== false ) {
-        pam_log( 'Slider cache HIT for: ' . $user_suffix );
+        pam_log( 'Slider cache HIT for: ' . $transient . $user_suffix );
         return $user_value;
     }
     
-    pam_log( 'Slider cache MISS for: ' . $user_suffix );
-    // Return false to indicate cache miss
+    pam_log( 'Slider cache MISS for: ' . $transient . $user_suffix );
+    // Return false to let slider build cache normally
     return false;
 }
-add_filter( 'pre_transient', 'pam_get_user_aware_slider_transient', 10, 2 );
 
 /**
  * Intercept slider transient SET operations
  */
 function pam_set_user_aware_slider_transient( $value, $expiration, $transient ) {
-    // Only intercept slider transients
-    if ( strpos( $transient, 'spwps_' ) !== 0 ) {
-        return $value;
-    }
-    
     // Get user-specific cache key
     $user_suffix = pam_get_user_cache_suffix();
     $user_transient = $transient . $user_suffix;
     
     // Save to user-specific transient
     set_transient( $user_transient, $value, $expiration );
-    pam_log( 'Slider cache SAVED for: ' . $user_suffix );
+    pam_log( 'Slider cache SAVED for: ' . $transient . $user_suffix );
     
     // Prevent saving to original key by returning false
     return false;
 }
-add_filter( 'pre_set_transient', 'pam_set_user_aware_slider_transient', 10, 3 );
+
+/**
+ * Register dynamic filters for all slider transients
+ * 
+ * We can't use static filter names because slider transient names are dynamic (include MD5 hash).
+ * Instead, we hook into WordPress's internal transient mechanism.
+ */
+add_action( 'init', function() {
+    // Hook into WordPress transient system at a low level
+    // This catches ALL get_transient() and set_transient() calls
+    add_filter( 'pre_transient', function( $value, $transient ) {
+        if ( strpos( $transient, 'spwps_' ) === 0 ) {
+            return pam_get_user_aware_slider_transient( $value, $transient );
+        }
+        return $value;
+    }, 10, 2 );
+    
+    add_filter( 'pre_set_transient', function( $value, $transient, $expiration ) {
+        if ( strpos( $transient, 'spwps_' ) === 0 ) {
+            return pam_set_user_aware_slider_transient( $value, $expiration, $transient );
+        }
+        return $value;
+    }, 10, 3 );
+}, 1 );
 
 /**
  * Get cache key suffix based on user's accessible catalogs
