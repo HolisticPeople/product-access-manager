@@ -9,7 +9,7 @@
 (function($) {
     'use strict';
     
-    console.log('[PAM FiboFilter] Script loaded v3.0.0');
+    console.log('[PAM FiboFilter] Script loaded v2.5.5');
     
     var pamBlockedProducts = [];
     var pamDataLoaded = false;
@@ -45,7 +45,7 @@
     }
     
     /**
-     * Filter FiboSearch results
+     * Filter FiboSearch results (comprehensive)
      */
     function pamFilterResults() {
         console.log('[PAM FiboFilter] Filtering results...');
@@ -55,66 +55,127 @@
         }
         console.log('[PAM FiboFilter] Filtering with ' + pamBlockedProducts.length + ' blocked products');
         
-        // Filter product suggestions (left panel)
-        $('.dgwt-wcas-suggestion').each(function() {
-            var $suggestion = $(this);
-            if ($suggestion.data('pam-filtered')) {
-                return; // Already processed
+        var removedCount = 0;
+        
+        // 1. Filter PRODUCT suggestions (left panel)
+        var productSelectors = [
+            '.dgwt-wcas-suggestion',
+            '.dgwt-wcas-suggestion-product',
+            '.dgwt-wcas-sp',
+            '.autocomplete-suggestion[data-index]'
+        ];
+        
+        $(productSelectors.join(', ')).each(function() {
+            var $item = $(this);
+            if ($item.data('pam-removed')) {
+                return;
             }
             
-            // Extract product ID from data attribute or URL
-            var productId = $suggestion.attr('data-post-id') || 
-                           $suggestion.attr('data-product-id') ||
-                           $suggestion.find('a').attr('data-post-id');
+            // Extract product ID - try multiple methods
+            var productId = $item.attr('data-post-id') || 
+                           $item.attr('data-product-id') ||
+                           $item.find('a').attr('data-post-id') ||
+                           $item.find('a').attr('data-product-id');
             
-            // If no ID found, try extracting from URL
+            // Try URL extraction if no ID found
             if (!productId) {
-                var url = $suggestion.find('a').attr('href') || '';
-                var match = url.match(/[\?&]product_id=(\d+)/);
-                if (match) {
-                    productId = match[1];
+                var $link = $item.find('a').first();
+                if ($link.length) {
+                    var href = $link.attr('href') || '';
+                    // Try multiple URL patterns
+                    var patterns = [
+                        /[\?&]product_id=(\d+)/,
+                        /\/product\/.*?[\?&]p=(\d+)/,
+                        /\/(\d+)\/?$/
+                    ];
+                    for (var i = 0; i < patterns.length; i++) {
+                        var match = href.match(patterns[i]);
+                        if (match) {
+                            productId = match[1];
+                            break;
+                        }
+                    }
                 }
             }
             
             if (productId && pamBlockedProducts.indexOf(parseInt(productId)) !== -1) {
-                $suggestion.data('pam-filtered', true);
-                $suggestion.remove();
+                console.log('[PAM FiboFilter] Removing product ' + productId);
+                $item.data('pam-removed', true);
+                $item.remove();
+                removedCount++;
             }
         });
         
-        // Filter details panel (right side on hover)
-        $('.dgwt-wcas-details-wrapp .dgwt-wcas-details-inner').each(function() {
-            var $details = $(this);
-            if ($details.data('pam-filtered')) {
+        // 2. Filter TAXONOMY suggestions (brands/tags with Vimergy)
+        var taxonomySelectors = [
+            '.dgwt-wcas-suggestion-taxonomy',
+            '.dgwt-wcas-st'
+        ];
+        
+        $(taxonomySelectors.join(', ')).each(function() {
+            var $item = $(this);
+            if ($item.data('pam-removed')) {
                 return;
             }
             
-            // Check product links in details
+            var text = $item.text().toLowerCase();
+            // Remove if contains "vimergy" or other restricted brands
+            if (text.indexOf('vimergy') !== -1) {
+                console.log('[PAM FiboFilter] Removing taxonomy item: ' + text);
+                $item.data('pam-removed', true);
+                $item.remove();
+                removedCount++;
+            }
+        });
+        
+        // 3. Filter RIGHT PANEL details (hover/selection view)
+        $('.dgwt-wcas-details-wrapp .dgwt-wcas-details-inner').each(function() {
+            var $details = $(this);
+            if ($details.data('pam-removed')) {
+                return;
+            }
+            
             var shouldRemove = false;
-            $details.find('a[href*="/product/"]').each(function() {
-                var url = $(this).attr('href') || '';
+            
+            // Check all product links in details
+            $details.find('a').each(function() {
+                var href = $(this).attr('href') || '';
+                var productId = $(this).attr('data-post-id') || $(this).attr('data-product-id');
                 
-                // Try to match product ID from URL
-                var match = url.match(/product\/([^\/\?]+)/);
-                if (match) {
-                    var slug = match[1];
-                    
-                    // Check if any blocked product URL contains this slug
-                    // (Since we don't have slugs, we'll check the link structure)
-                    // For now, we'll use a different approach - check data attributes
-                    var productId = $(this).attr('data-post-id') || 
-                                   $(this).attr('data-product-id');
-                    
-                    if (productId && pamBlockedProducts.indexOf(parseInt(productId)) !== -1) {
-                        shouldRemove = true;
-                        return false; // break
+                // Try to extract ID from URL if not in attribute
+                if (!productId && href.indexOf('/product/') !== -1) {
+                    var patterns = [
+                        /[\?&]product_id=(\d+)/,
+                        /\/product\/.*?[\?&]p=(\d+)/,
+                        /\/(\d+)\/?$/
+                    ];
+                    for (var i = 0; i < patterns.length; i++) {
+                        var match = href.match(patterns[i]);
+                        if (match) {
+                            productId = match[1];
+                            break;
+                        }
                     }
+                }
+                
+                if (productId && pamBlockedProducts.indexOf(parseInt(productId)) !== -1) {
+                    shouldRemove = true;
+                    return false; // break
+                }
+                
+                // Also check text for brand names
+                var text = $(this).text().toLowerCase();
+                if (text.indexOf('vimergy') !== -1) {
+                    shouldRemove = true;
+                    return false;
                 }
             });
             
             if (shouldRemove) {
-                $details.data('pam-filtered', true);
+                console.log('[PAM FiboFilter] Removing details panel');
+                $details.data('pam-removed', true);
                 $details.remove();
+                removedCount++;
                 
                 // Hide wrapper if no details left
                 var $wrapper = $('.dgwt-wcas-details-wrapp');
@@ -123,6 +184,8 @@
                 }
             }
         });
+        
+        console.log('[PAM FiboFilter] Removed ' + removedCount + ' items total');
     }
     
     /**

@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.5.4
+ * Version: 2.5.5
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
