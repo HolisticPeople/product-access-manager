@@ -32,7 +32,7 @@ define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 // Debug mode - set to false in production
-define( 'PAM_DEBUG', false );
+define( 'PAM_DEBUG', true );
 
 /**
  * Debug logging function
