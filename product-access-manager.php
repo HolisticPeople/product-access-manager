@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.6.0
+ * Version: 2.6.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.6.0' );
+define( 'PAM_VERSION', '2.6.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -825,13 +825,33 @@ function pam_ajax_get_restricted_data() {
     }
     ob_start();
     
-    $restricted_product_ids = pam_get_restricted_product_ids();
+    // For AJAX: get ALL restricted products (don't check current user's access)
+    // The client-side filter needs to know what products are restricted, regardless of who's calling
+    $restricted_catalogs = pam_get_restricted_catalogs();
     $restricted_brands = pam_get_restricted_brand_names();
     
-    // Get product URLs for client-side matching
+    // Get all products with restricted catalogs
+    $all_products = wc_get_products([
+        'limit' => -1,
+        'return' => 'ids',
+        'status' => 'publish',
+    ]);
+    
+    $restricted_product_ids = [];
     $restricted_product_urls = [];
-    foreach ( $restricted_product_ids as $product_id ) {
-        $restricted_product_urls[] = get_permalink( $product_id );
+    
+    foreach ( $all_products as $product_id ) {
+        $product_catalog = get_field( 'site_catalog', $product_id );
+        if ( $product_catalog ) {
+            $catalogs = is_array( $product_catalog ) ? $product_catalog : array( $product_catalog );
+            foreach ( $catalogs as $catalog ) {
+                if ( in_array( $catalog, $restricted_catalogs, true ) ) {
+                    $restricted_product_ids[] = $product_id;
+                    $restricted_product_urls[] = get_permalink( $product_id );
+                    break;
+                }
+            }
+        }
     }
     
     pam_log( 'AJAX: Returning ' . count( $restricted_product_ids ) . ' restricted products, ' . count( $restricted_brands ) . ' brands' );
