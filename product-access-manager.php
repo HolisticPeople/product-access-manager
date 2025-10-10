@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.5.7
+ * Version: 2.5.8
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.5.7' );
+define( 'PAM_VERSION', '2.5.8' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -231,6 +231,7 @@ function pam_get_blocked_products_cached( $user_id = null ) {
     
     // Cache key
     $cache_key = $user_id ? 'pam_hidden_products_' . $user_id : 'pam_hidden_products_guest';
+    $lock_key = $cache_key . '_building';
     
     // Try cache first (performance layer)
     $blocked = get_transient( $cache_key );
@@ -239,7 +240,29 @@ function pam_get_blocked_products_cached( $user_id = null ) {
         return $blocked;
     }
     
-    pam_log( 'Cache MISS for ' . $cache_key . ' - rebuilding' );
+    // Check if another process is already building the cache
+    $is_building = get_transient( $lock_key );
+    if ( $is_building ) {
+        pam_log( 'Cache is being rebuilt by another process - waiting...' );
+        
+        // Wait briefly and retry (max 3 attempts)
+        for ( $i = 0; $i < 3; $i++ ) {
+            usleep( 100000 ); // 100ms
+            $blocked = get_transient( $cache_key );
+            if ( $blocked !== false ) {
+                pam_log( 'Cache became available after waiting' );
+                return $blocked;
+            }
+        }
+        
+        // Still not ready - fail secure by blocking all restricted products
+        pam_log( 'Cache still building after wait - using fail-secure mode' );
+        return pam_get_restricted_product_ids();
+    }
+    
+    // Set lock to prevent concurrent rebuilds (5 second lock)
+    set_transient( $lock_key, true, 5 );
+    pam_log( 'Cache MISS for ' . $cache_key . ' - rebuilding (lock acquired)' );
     
     // Calculate (security layer)
     try {
@@ -261,7 +284,11 @@ function pam_get_blocked_products_cached( $user_id = null ) {
     
     // Cache for 30 minutes
     set_transient( $cache_key, $blocked, 30 * MINUTE_IN_SECONDS );
-    pam_log( 'Cache SAVED for ' . $cache_key . ' - ' . count( $blocked ) . ' blocked products' );
+    
+    // Release lock
+    delete_transient( $lock_key );
+    
+    pam_log( 'Cache SAVED for ' . $cache_key . ' - ' . count( $blocked ) . ' blocked products (lock released)' );
     
     return $blocked;
 }
