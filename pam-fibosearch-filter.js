@@ -9,6 +9,8 @@
 (function($) {
     'use strict';
     
+    console.log('[PAM FiboFilter] Script loaded v3.0.0');
+    
     var pamBlockedProducts = [];
     var pamDataLoaded = false;
     
@@ -16,6 +18,7 @@
      * Fetch blocked products from server (uses 30-min cache!)
      */
     function pamLoadBlockedProducts() {
+        console.log('[PAM FiboFilter] Loading blocked products from server...');
         $.ajax({
             url: pamFiboFilter.ajaxUrl,
             type: 'POST',
@@ -23,13 +26,20 @@
                 action: 'pam_get_blocked_products'
             },
             success: function(response) {
+                console.log('[PAM FiboFilter] AJAX response:', response);
                 if (response.success && response.data) {
                     pamBlockedProducts = response.data;
                     pamDataLoaded = true;
+                    console.log('[PAM FiboFilter] Loaded ' + pamBlockedProducts.length + ' blocked products');
                     
                     // Filter any existing results
                     pamFilterResults();
+                } else {
+                    console.error('[PAM FiboFilter] Failed to load blocked products');
                 }
+            },
+            error: function(xhr, status, error) {
+                console.error('[PAM FiboFilter] AJAX error:', status, error);
             }
         });
     }
@@ -38,9 +48,12 @@
      * Filter FiboSearch results
      */
     function pamFilterResults() {
+        console.log('[PAM FiboFilter] Filtering results...');
         if (!pamDataLoaded || pamBlockedProducts.length === 0) {
+            console.log('[PAM FiboFilter] Skipping filter - data not loaded or no blocked products');
             return;
         }
+        console.log('[PAM FiboFilter] Filtering with ' + pamBlockedProducts.length + ' blocked products');
         
         // Filter product suggestions (left panel)
         $('.dgwt-wcas-suggestion').each(function() {
