@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.6.3
+ * Version: 2.6.4
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.6.3' );
+define( 'PAM_VERSION', '2.6.4' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -409,7 +409,26 @@ function pam_clear_blocked_products_cache( $user_id = null ) {
     } else {
         delete_transient( 'pam_hidden_products_guest' );
         pam_log( 'Cleared cache for guests' );
+        
+        // Also clear Product Slider Pro cache (it caches HTML output)
+        pam_clear_slider_transients();
     }
+}
+
+/**
+ * Clear Product Slider Pro transients
+ * 
+ * The slider caches its HTML output in transients with keys like 'spwps_HASH'.
+ * When guest cache is cleared, also clear slider cache to prevent showing old HTML.
+ */
+function pam_clear_slider_transients() {
+    global $wpdb;
+    
+    // Delete all slider transients
+    $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_spwps_%'" );
+    $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_timeout_spwps_%'" );
+    
+    pam_log( 'Cleared Product Slider transients' );
 }
 
 /**
