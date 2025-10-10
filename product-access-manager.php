@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.5.6
+ * Version: 2.5.7
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,12 +27,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.5.6' );
+define( 'PAM_VERSION', '2.5.7' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 // Debug mode - set to false in production
-define( 'PAM_DEBUG', false );
+define( 'PAM_DEBUG', true );
 
 /**
  * Debug logging function
@@ -73,6 +73,9 @@ add_action( 'init', function () {
     
     // Query filters (reveal restricted products to authorized users)
     add_action( 'pre_get_posts', 'pam_modify_query' );
+    
+    // Filter wc_get_products() calls (catches sliders, widgets, related products, etc.)
+    add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_wc_get_products', 10, 2 );
     
     // Cache invalidation hooks
     add_action( 'wp_login', 'pam_clear_user_cache_on_login', 10, 2 );
@@ -164,7 +167,7 @@ function pam_get_all_catalogs() {
                 $unserialized = maybe_unserialize( $serialized );
                 if ( is_array( $unserialized ) ) {
                     $all_catalogs = array_merge( $all_catalogs, $unserialized );
-                } else {
+        } else {
                     $all_catalogs[] = $unserialized;
                 }
             }
@@ -358,7 +361,7 @@ function pam_user_has_any_access_role( $user_id ) {
     $user = get_userdata( $user_id );
     if ( ! $user ) {
             return false;
-    }
+        }
     foreach ( $user->roles as $role ) {
         if ( strpos( $role, 'access-' ) === 0 ) {
             return true;
@@ -446,7 +449,7 @@ function pam_is_restricted_product( $product ) {
         if ( in_array( $catalog, $restricted_catalogs, true ) ) {
             pam_log( 'Product ' . $product_id . ' is RESTRICTED by catalog: ' . $catalog );
         return true;
-        }
+    }
     }
     
     pam_log( 'Product ' . $product_id . ' has PUBLIC catalogs only: ' . implode( ', ', (array) $catalogs ) );
@@ -536,12 +539,12 @@ function pam_user_can_view( $product, $user_id = null ) {
     foreach ( $required_roles as $role ) {
         if ( in_array( $role, $user->roles ) ) {
             pam_log( 'User ' . $user_id . ' has role ' . $role . ' - allowing access to product ' . $product_id );
-            return true;
+        return true;
         }
     }
-    
+
     pam_log( 'User ' . $user_id . ' does not have required roles for product ' . $product_id . ' - denying access' );
-    return false;
+        return false;
 }
 
 // ============================================================================
@@ -857,4 +860,45 @@ function pam_get_restricted_brand_names() {
     }
     
     return $restricted_brands;
+}
+
+/**
+ * Filter wc_get_products() queries to exclude restricted products
+ * 
+ * Universal filter that catches ALL uses of wc_get_products() across plugins/themes.
+ * This includes: Product sliders, related products, upsells, widgets, custom queries.
+ * 
+ * @param array $wp_query_args Query arguments for WP_Query
+ * @param array $query_vars Query variables passed to wc_get_products()
+ * @return array Modified query arguments with post__not_in exclusion
+ */
+function pam_filter_wc_get_products( $wp_query_args, $query_vars ) {
+    // Skip for admins
+    if ( current_user_can( 'manage_woocommerce' ) ) {
+        return $wp_query_args;
+    }
+    
+    // Get blocked products from cache (same as shop/search queries)
+    $blocked_products = pam_get_blocked_products_cached();
+    
+    if ( empty( $blocked_products ) ) {
+        return $wp_query_args;
+    }
+    
+    // Add exclusion to query arguments
+    if ( isset( $wp_query_args['post__not_in'] ) ) {
+        // Merge with existing exclusions
+        $wp_query_args['post__not_in'] = array_unique( 
+            array_merge( 
+                (array) $wp_query_args['post__not_in'], 
+                $blocked_products 
+            ) 
+        );
+    } else {
+        $wp_query_args['post__not_in'] = $blocked_products;
+    }
+    
+    pam_log( 'wc_get_products(): Excluded ' . count( $blocked_products ) . ' products' );
+    
+    return $wp_query_args;
 }
