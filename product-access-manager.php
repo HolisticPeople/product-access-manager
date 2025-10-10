@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Product Access Manager
  * Plugin URI: 
- * Description: ACF-based product access control. Vimergy products use "search" visibility + role-based filtering. HP and DCG catalogs are public.
- * Version: 2.4.0
+ * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
+ * Version: 2.5.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.4.0' );
+define( 'PAM_VERSION', '2.5.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -74,6 +74,11 @@ add_action( 'init', function () {
     // Query filters (reveal restricted products to authorized users)
     add_action( 'pre_get_posts', 'pam_modify_query' );
     
+    // Cache invalidation hooks
+    add_action( 'wp_login', 'pam_clear_user_cache_on_login', 10, 2 );
+    add_action( 'wp_logout', 'pam_clear_user_cache_on_logout' );
+    add_action( 'set_user_role', 'pam_clear_user_cache_on_role_change', 10, 3 );
+    
     pam_log( 'WooCommerce hooks registered' );
 } );
 
@@ -84,13 +89,8 @@ add_action( 'init', function () {
 add_action( 'plugins_loaded', function () {
     // NOTE: We do NOT prevent indexing because authorized users need to search too!
     
-    // Server-side filter (runs during full WordPress load - won't work in SHORTINIT)
+    // Server-side filter using cached blocked products (works even in SHORTINIT mode)
     add_filter( 'dgwt/wcas/tnt/search_results/suggestion/product', 'pam_filter_fibo_product', 10, 2 );
-    
-    // Client-side filtering (PRIMARY method for FiboSearch due to SHORTINIT mode)
-    add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
-    add_action( 'wp_ajax_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
-    add_action( 'wp_ajax_nopriv_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
     
     pam_log( 'FiboSearch hooks registered' );
 }, 5 );
@@ -205,6 +205,213 @@ function pam_get_restricted_catalogs() {
     return array_values( $restricted_catalogs );
 }
 
+// ============================================================================
+// SESSION-BASED CACHING (Performance Optimization)
+// ============================================================================
+
+/**
+ * Get blocked product IDs for current user (cached)
+ * 
+ * Returns product IDs that should be hidden from current user.
+ * Cached per user for 30 minutes for performance.
+ * FAIL-SECURE: On error, hides all restricted products.
+ * 
+ * @param int|null $user_id User ID (null = current user)
+ * @return array Product IDs to block
+ */
+function pam_get_blocked_products_cached( $user_id = null ) {
+    if ( ! $user_id ) {
+        $user_id = get_current_user_id();
+    }
+    
+    // Cache key
+    $cache_key = $user_id ? 'pam_hidden_products_' . $user_id : 'pam_hidden_products_guest';
+    
+    // Try cache first (performance layer)
+    $blocked = get_transient( $cache_key );
+    if ( $blocked !== false ) {
+        pam_log( 'Cache HIT for ' . $cache_key . ' - ' . count( $blocked ) . ' blocked products' );
+        return $blocked;
+    }
+    
+    pam_log( 'Cache MISS for ' . $cache_key . ' - rebuilding' );
+    
+    // Calculate (security layer)
+    try {
+        $blocked = pam_calculate_blocked_products( $user_id );
+        
+        // Sanity check (fail-secure)
+        if ( empty( $blocked ) ) {
+            $all_restricted = pam_get_restricted_product_ids();
+            if ( ! empty( $all_restricted ) && ! pam_user_has_any_access_role( $user_id ) ) {
+                pam_log( 'FAIL-SECURE: Empty blocked list but user has no access roles - blocking all restricted' );
+                $blocked = $all_restricted;
+            }
+        }
+        
+    } catch ( Exception $e ) {
+        pam_log( 'ERROR calculating blocked products: ' . $e->getMessage() );
+        $blocked = pam_get_restricted_product_ids(); // Fail secure
+    }
+    
+    // Cache for 30 minutes
+    set_transient( $cache_key, $blocked, 30 * MINUTE_IN_SECONDS );
+    pam_log( 'Cache SAVED for ' . $cache_key . ' - ' . count( $blocked ) . ' blocked products' );
+    
+    return $blocked;
+}
+
+/**
+ * Calculate which products should be blocked for user
+ * 
+ * @param int|null $user_id User ID (0 = guest)
+ * @return array Product IDs to block
+ */
+function pam_calculate_blocked_products( $user_id ) {
+    // Admin/shop managers see everything
+    if ( current_user_can( 'manage_woocommerce' ) ) {
+        pam_log( 'Admin user - no products blocked' );
+        return array();
+    }
+    
+    // Get all restricted product IDs
+    $restricted_products = pam_get_restricted_product_ids();
+    if ( empty( $restricted_products ) ) {
+        pam_log( 'No restricted products exist - nothing to block' );
+        return array();
+    }
+    
+    pam_log( 'Found ' . count( $restricted_products ) . ' restricted products total' );
+    
+    // Guest users: block all restricted products
+    if ( ! $user_id ) {
+        pam_log( 'Guest user - blocking all ' . count( $restricted_products ) . ' restricted products' );
+        return $restricted_products;
+    }
+    
+    // Logged-in users: check which catalogs they can access
+    $user = get_userdata( $user_id );
+    if ( ! $user ) {
+        pam_log( 'Invalid user ID ' . $user_id . ' - blocking all restricted products' );
+        return $restricted_products;
+    }
+    
+    $user_accessible_catalogs = array();
+    foreach ( $user->roles as $role ) {
+        if ( strpos( $role, 'access-' ) === 0 ) {
+            // Convert role to catalog
+            // "access-vimergy-user" → "Vimergy_catalog"
+            $brand = str_replace( array( 'access-', '-user' ), '', $role );
+            $catalog = ucfirst( $brand ) . '_catalog';
+            $user_accessible_catalogs[] = $catalog;
+        }
+    }
+    
+    // No access roles: block everything
+    if ( empty( $user_accessible_catalogs ) ) {
+        pam_log( 'User ' . $user_id . ' has no access roles - blocking all restricted products' );
+        return $restricted_products;
+    }
+    
+    pam_log( 'User ' . $user_id . ' has access to catalogs: ' . implode( ', ', $user_accessible_catalogs ) );
+    
+    // Filter: only block products user can't access
+    $blocked = array();
+    foreach ( $restricted_products as $product_id ) {
+        $product_catalog = get_field( 'site_catalog', $product_id );
+        if ( ! $product_catalog ) {
+            continue; // Not restricted
+        }
+        
+        // Check if user has access to this product's catalog
+        $product_catalogs = is_array( $product_catalog ) ? $product_catalog : array( $product_catalog );
+        $has_access = false;
+        foreach ( $product_catalogs as $cat ) {
+            if ( in_array( $cat, $user_accessible_catalogs, true ) ) {
+                $has_access = true;
+                break;
+            }
+        }
+        
+        if ( ! $has_access ) {
+            $blocked[] = $product_id;
+        }
+    }
+    
+    pam_log( 'User ' . $user_id . ' - blocking ' . count( $blocked ) . ' of ' . count( $restricted_products ) . ' restricted products' );
+    
+    return $blocked;
+}
+
+/**
+ * Check if user has any access-* role
+ * 
+ * @param int|null $user_id User ID
+ * @return bool True if user has at least one access role
+ */
+function pam_user_has_any_access_role( $user_id ) {
+    if ( ! $user_id ) {
+        return false;
+    }
+    $user = get_userdata( $user_id );
+    if ( ! $user ) {
+            return false;
+    }
+    foreach ( $user->roles as $role ) {
+        if ( strpos( $role, 'access-' ) === 0 ) {
+            return true;
+        }
+    }
+            return false;
+        }
+
+/**
+ * Clear cached blocked products for user
+ * 
+ * @param int|null $user_id User ID (null = guest)
+ */
+function pam_clear_blocked_products_cache( $user_id = null ) {
+    if ( $user_id ) {
+        delete_transient( 'pam_hidden_products_' . $user_id );
+        pam_log( 'Cleared cache for user ' . $user_id );
+    } else {
+        delete_transient( 'pam_hidden_products_guest' );
+        pam_log( 'Cleared cache for guests' );
+    }
+}
+
+/**
+ * Clear cache on user login
+ * 
+ * @param string $user_login User login name
+ * @param WP_User $user User object
+ */
+function pam_clear_user_cache_on_login( $user_login, $user ) {
+    pam_clear_blocked_products_cache( $user->ID );
+}
+
+/**
+ * Clear cache on user logout
+ */
+function pam_clear_user_cache_on_logout() {
+    pam_clear_blocked_products_cache( get_current_user_id() );
+}
+
+/**
+ * Clear cache when user roles change
+ * 
+ * @param int $user_id User ID
+ * @param string $role New role
+ * @param array $old_roles Previous roles
+ */
+function pam_clear_user_cache_on_role_change( $user_id, $role, $old_roles ) {
+    pam_clear_blocked_products_cache( $user_id );
+}
+
+// ============================================================================
+// PRODUCT RESTRICTION CHECKS
+// ============================================================================
+
 /**
  * Check if product is restricted (has restricted site_catalog ACF field set)
  * 
@@ -236,7 +443,7 @@ function pam_is_restricted_product( $product ) {
     foreach ( (array) $catalogs as $catalog ) {
         if ( in_array( $catalog, $restricted_catalogs, true ) ) {
             pam_log( 'Product ' . $product_id . ' is RESTRICTED by catalog: ' . $catalog );
-            return true;
+        return true;
         }
     }
     
@@ -300,7 +507,7 @@ function pam_user_can_view( $product, $user_id = null ) {
         pam_log( 'Admin user - allowing access to product ' . $product_id );
         return true;
     }
-    
+
     // Check if product is restricted
     $required_roles = pam_get_required_roles( $product_id );
     if ( empty( $required_roles ) ) {
@@ -323,7 +530,7 @@ function pam_user_can_view( $product, $user_id = null ) {
         pam_log( 'Invalid user ID ' . $user_id . ' - denying access' );
         return false;
     }
-    
+
     foreach ( $required_roles as $role ) {
         if ( in_array( $role, $user->roles ) ) {
             pam_log( 'User ' . $user_id . ' has role ' . $role . ' - allowing access to product ' . $product_id );
@@ -431,7 +638,7 @@ function pam_modify_query( $query ) {
         return;
     }
 
-    // Skip if not main query or not shop/archive
+    // Skip if not main query or not shop/archive/search
     if ( ! $query->is_main_query() || ! ( $query->is_shop() || $query->is_product_taxonomy() || $query->is_search() ) ) {
         return;
     }
@@ -442,58 +649,18 @@ function pam_modify_query( $query ) {
         return;
     }
     
-    pam_log( 'Modifying query for user ' . ( is_user_logged_in() ? get_current_user_id() : 'guest' ) );
+    // Get blocked products from cache (fast!)
+    $blocked_products = pam_get_blocked_products_cached();
     
-    // WC will naturally exclude hidden products
-    // We need to potentially INCLUDE restricted products for authorized users
-    
-    if ( ! is_user_logged_in() ) {
-        pam_log( 'User not logged in - letting WC hide restricted products' );
-        return; // Let WC hide everything restricted
+    if ( empty( $blocked_products ) ) {
+        pam_log( 'No products to block for current user' );
+        return;
     }
     
-    // Get user's accessible catalogs
-    $user = wp_get_current_user();
-    $accessible_catalogs = [];
+    // Exclude blocked products using post__not_in (fastest method)
+    $query->set( 'post__not_in', $blocked_products );
     
-    foreach ( $user->roles as $role ) {
-        if ( strpos( $role, 'access-' ) === 0 ) {
-            // Convert role back to catalog
-            // "access-vimergy-user" → "Vimergy_catalog"
-            // "access-dcg-user" → "DCG_catalog"
-            $brand = str_replace( ['access-', '-user'], '', $role );
-            $accessible_catalogs[] = ucfirst( $brand ) . '_catalog';
-        }
-    }
-    
-    if ( empty( $accessible_catalogs ) ) {
-        pam_log( 'User has no special access roles - letting WC hide restricted products' );
-        return; // No special access
-    }
-    
-    pam_log( 'User has access to catalogs: ' . implode( ', ', $accessible_catalogs ) );
-    
-    // Modify meta query to include products user can access
-    // This overrides WC's hidden visibility for authorized products
-    $meta_query = $query->get( 'meta_query' ) ?: [];
-    
-    // Add our reveal logic
-    $meta_query[] = [
-        'relation' => 'OR',
-        [
-            'key' => 'site_catalog',
-            'compare' => 'NOT EXISTS', // Public products (no catalog set)
-        ],
-        [
-            'key' => 'site_catalog',
-            'value' => $accessible_catalogs,
-            'compare' => 'IN', // User's accessible catalogs
-        ],
-    ];
-    
-    $query->set( 'meta_query', $meta_query );
-    
-    pam_log( 'Query modified to reveal restricted products' );
+    pam_log( 'Excluded ' . count( $blocked_products ) . ' products from query' );
 }
 
 // ============================================================================
@@ -517,14 +684,17 @@ function pam_modify_query( $query ) {
  * @return array|bool Modified suggestion or false to hide
  */
 function pam_filter_fibo_product( $suggestion, $post_id ) {
-    // If user can't view this product, hide it from FiboSearch
-    if ( ! pam_user_can_view( $post_id ) ) {
-        pam_log( 'FiboSearch: Hiding product ' . $post_id . ' from unauthorized user' );
-        return false; // Remove from suggestions
+    // Use cached blocked products (same as WooCommerce queries)
+    $blocked_products = pam_get_blocked_products_cached();
+    
+    // If product is blocked for this user, hide it from FiboSearch
+    if ( in_array( $post_id, $blocked_products, true ) ) {
+        pam_log( 'FiboSearch: Hiding blocked product ' . $post_id );
+        return false; // Hide from results
     }
     
-    pam_log( 'FiboSearch: Showing product ' . $post_id . ' to authorized user' );
-    return $suggestion;
+    pam_log( 'FiboSearch: Showing product ' . $post_id );
+    return $suggestion; // Show in results
 }
 
 // ============================================================================
@@ -591,89 +761,5 @@ function pam_get_restricted_product_ids() {
 // FIBOSEARCH CLIENT-SIDE FILTERING (For SHORTINIT Mode)
 // ============================================================================
 
-/**
- * Enqueue FiboSearch filtering JavaScript
- */
-function pam_enqueue_fibo_filter_script() {
-    wp_enqueue_script(
-        'pam-fibosearch-filter',
-        plugins_url( 'pam-fibosearch-filter.js', __FILE__ ),
-        array( 'jquery' ),
-        PAM_VERSION,
-        true
-    );
-    
-    wp_localize_script( 'pam-fibosearch-filter', 'pamFiboFilter', array(
-        'ajaxUrl' => admin_url( 'admin-ajax.php' )
-    ) );
-    
-    pam_log( 'FiboSearch filter script enqueued' );
-}
-
-/**
- * AJAX handler: Get restricted products and brands for current user
- */
-function pam_ajax_get_restricted_data() {
-    // Clean output buffer to prevent PHP notices from breaking JSON
-    while ( ob_get_level() > 0 ) {
-        ob_end_clean();
-    }
-    ob_start();
-    
-    $restricted_product_ids = pam_get_restricted_product_ids();
-    $restricted_brands = pam_get_restricted_brand_names();
-    
-    // Get product URLs for client-side matching
-    $restricted_product_urls = [];
-    foreach ( $restricted_product_ids as $product_id ) {
-        $restricted_product_urls[] = get_permalink( $product_id );
-    }
-    
-    wp_send_json_success( array(
-        'products' => $restricted_product_ids,
-        'product_urls' => $restricted_product_urls,
-        'brands' => $restricted_brands,
-    ) );
-}
-
-/**
- * Get restricted brand names for current user
- * 
- * @return array Array of brand names that current user cannot see
- */
-function pam_get_restricted_brand_names() {
-    if ( pam_user_has_full_access() ) {
-        return [];
-    }
-    
-    // Get restricted catalogs from centralized function
-    $restricted_catalogs_list = pam_get_restricted_catalogs();
-    
-    // Get user's accessible catalogs
-    $accessible_catalogs = [];
-    if ( is_user_logged_in() ) {
-        $user = wp_get_current_user();
-        foreach ( $user->roles as $role ) {
-            if ( strpos( $role, 'access-' ) === 0 ) {
-                // Convert role to catalog
-                // "access-vimergy-user" → "Vimergy_catalog"
-                $brand = str_replace( array( 'access-', '-user' ), '', $role );
-                $accessible_catalogs[] = ucfirst( $brand ) . '_catalog';
-            }
-        }
-    }
-    
-    // Get restricted catalogs (ones user can't access)
-    // Only consider catalogs that are actually restricted (not HP/DCG)
-    $restricted_catalogs = array_diff( $restricted_catalogs_list, $accessible_catalogs );
-    
-    // Convert to brand names for display filtering
-    $restricted_brands = [];
-    foreach ( $restricted_catalogs as $catalog ) {
-        // "Vimergy_catalog" → "Vimergy"
-        $brand = str_replace( '_catalog', '', $catalog );
-        $restricted_brands[] = $brand;
-    }
-    
-    return $restricted_brands;
-}
+// NOTE: Client-side FiboSearch filtering removed in v2.5.0
+// Now using server-side filtering with cached blocked products (much simpler and faster!)
