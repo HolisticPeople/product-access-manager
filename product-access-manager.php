@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.5.8
+ * Version: 2.5.9
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.5.8' );
+define( 'PAM_VERSION', '2.5.9' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -75,7 +75,8 @@ add_action( 'init', function () {
     add_action( 'pre_get_posts', 'pam_modify_query' );
     
     // Filter wc_get_products() calls (catches sliders, widgets, related products, etc.)
-    add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_wc_get_products', 10, 2 );
+    // TEMPORARILY DISABLED: Causes memory exhaustion when cache needs rebuild during page load
+    // add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_wc_get_products', 10, 2 );
     
     // Cache invalidation hooks
     add_action( 'wp_login', 'pam_clear_user_cache_on_login', 10, 2 );
