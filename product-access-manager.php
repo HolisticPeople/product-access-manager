@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.8.0
+ * Version: 2.8.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,12 +27,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.8.0' );
+define( 'PAM_VERSION', '2.8.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 // Debug mode - set to false in production
-define( 'PAM_DEBUG', true );
+define( 'PAM_DEBUG', false );
 
 /**
  * Debug logging function
@@ -383,8 +383,8 @@ function pam_calculate_blocked_products( $user_id ) {
  */
 function pam_user_has_any_access_role( $user_id ) {
     if ( ! $user_id ) {
-        return false;
-    }
+            return false;
+        }
     $user = get_userdata( $user_id );
     if ( ! $user ) {
         return false;
@@ -396,6 +396,63 @@ function pam_user_has_any_access_role( $user_id ) {
     }
         return false;
     }
+
+/**
+ * Get ALL restricted products (cached, not user-specific)
+ * 
+ * Used by sliders - returns ALL products with restricted catalogs.
+ * Cached for 30 minutes, shared by all users.
+ * 
+ * @return array Product IDs with restricted catalogs
+ */
+function pam_get_all_restricted_products_cached() {
+    $cache_key = 'pam_all_restricted_products';
+    
+    // Try cache first
+    $cached = get_transient( $cache_key );
+    if ( $cached !== false ) {
+        pam_log( 'Restricted products cache HIT - ' . count( $cached ) . ' products' );
+        return $cached;
+    }
+    
+    pam_log( 'Restricted products cache MISS - rebuilding' );
+    
+    $restricted_catalogs = pam_get_restricted_catalogs();
+    
+    if ( empty( $restricted_catalogs ) ) {
+        set_transient( $cache_key, [], 30 * MINUTE_IN_SECONDS );
+        return [];
+    }
+    
+    // Get all products with restricted catalogs
+    $GLOBALS['pam_building_cache'] = true;
+    $all_products = wc_get_products([
+        'limit' => -1,
+        'return' => 'ids',
+        'status' => 'publish',
+    ]);
+    unset( $GLOBALS['pam_building_cache'] );
+    
+    $restricted_products = [];
+    foreach ( $all_products as $product_id ) {
+        $product_catalog = get_field( 'site_catalog', $product_id );
+        if ( $product_catalog ) {
+            $catalogs = is_array( $product_catalog ) ? $product_catalog : array( $product_catalog );
+            foreach ( $catalogs as $catalog ) {
+                if ( in_array( $catalog, $restricted_catalogs, true ) ) {
+                    $restricted_products[] = $product_id;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Cache for 30 minutes
+    set_transient( $cache_key, $restricted_products, 30 * MINUTE_IN_SECONDS );
+    pam_log( 'Restricted products cache SAVED - ' . count( $restricted_products ) . ' products' );
+    
+    return $restricted_products;
+}
 
 /**
  * Clear cached blocked products for user
@@ -411,8 +468,9 @@ function pam_clear_blocked_products_cache( $user_id = null ) {
         pam_log( 'Cleared cache for guests' );
     }
     
-    // Note: We no longer clear slider cache - sliders never show restricted products for anyone
-    // The slider cache is the same for all users (no restricted products) so it can be shared safely
+    // Also clear the shared "all restricted products" cache used by sliders
+    delete_transient( 'pam_all_restricted_products' );
+    pam_log( 'Cleared all restricted products cache' );
 }
 
 /**
@@ -989,44 +1047,9 @@ function pam_filter_wc_get_products( $wp_query_args, $query_vars ) {
         return $wp_query_args;
     }
     
-    // Static cache for this page load (performance optimization)
-    static $all_restricted_products = null;
-    
-    if ( $all_restricted_products === null ) {
-        // For sliders: ALWAYS exclude ALL restricted products (even from authorized users)
-        // This simplifies caching and ensures sliders never show restricted products
-        $restricted_catalogs = pam_get_restricted_catalogs();
-        
-        if ( empty( $restricted_catalogs ) ) {
-            $all_restricted_products = [];
-            return $wp_query_args;
-        }
-        
-        // Get all products with restricted catalogs
-        $GLOBALS['pam_building_cache'] = true;
-        $all_products = wc_get_products([
-            'limit' => -1,
-            'return' => 'ids',
-            'status' => 'publish',
-        ]);
-        unset( $GLOBALS['pam_building_cache'] );
-        
-        $all_restricted_products = [];
-        foreach ( $all_products as $product_id ) {
-            $product_catalog = get_field( 'site_catalog', $product_id );
-            if ( $product_catalog ) {
-                $catalogs = is_array( $product_catalog ) ? $product_catalog : array( $product_catalog );
-                foreach ( $catalogs as $catalog ) {
-                    if ( in_array( $catalog, $restricted_catalogs, true ) ) {
-                        $all_restricted_products[] = $product_id;
-                        break;
-                    }
-                }
-            }
-        }
-        
-        pam_log( 'wc_get_products(): Calculated ' . count( $all_restricted_products ) . ' restricted products to exclude from sliders' );
-    }
+    // For sliders: ALWAYS exclude ALL restricted products (even from authorized users)
+    // Use cached list for performance (30-minute cache, same as shop/search)
+    $all_restricted_products = pam_get_all_restricted_products_cached();
     
     if ( empty( $all_restricted_products ) ) {
         return $wp_query_args;
