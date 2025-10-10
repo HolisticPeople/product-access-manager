@@ -1,228 +1,216 @@
 /**
- * FiboSearch Client-Side Filter
- * Version: 3.0.0 (Lightweight with cached endpoint)
+ * Product Access Manager - FiboSearch Client-Side Filtering
+ * Version: 2.2.0
  * 
- * Filters FiboSearch results to hide restricted products for unauthorized users.
- * Uses server-side cached blocked products for fast, reliable filtering.
+ * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
+ * which bypasses our server-side PHP filters.
+ * 
+ * Production ready - all debug logging removed.
  */
-
 (function($) {
     'use strict';
     
-    console.log('[PAM FiboFilter] Script loaded v2.5.5');
+    var pamRestrictedProducts = null;
+    var pamRestrictedProductUrls = [];
+    var pamIsLoading = false;
+    var pamRestrictedBrands = [];
     
-    var pamBlockedProducts = [];
-    var pamDataLoaded = false;
-    
-    /**
-     * Fetch blocked products from server (uses 30-min cache!)
-     */
-    function pamLoadBlockedProducts() {
-        console.log('[PAM FiboFilter] Loading blocked products from server...');
+    // Fetch restricted products from server
+    function pamFetchRestrictedProducts() {
+        if (pamIsLoading || pamRestrictedProducts !== null) {
+            return;
+        }
+        
+        pamIsLoading = true;
+        
         $.ajax({
             url: pamFiboFilter.ajaxUrl,
             type: 'POST',
             data: {
-                action: 'pam_get_blocked_products'
+                action: 'pam_get_restricted_data'
             },
-            success: function(response) {
-                console.log('[PAM FiboFilter] AJAX response:', response);
-                if (response.success && response.data) {
-                    pamBlockedProducts = response.data;
-                    pamDataLoaded = true;
-                    console.log('[PAM FiboFilter] Loaded ' + pamBlockedProducts.length + ' blocked products');
-                    
-                    // Filter any existing results
-                    pamFilterResults();
-                } else {
-                    console.error('[PAM FiboFilter] Failed to load blocked products');
-                }
-            },
+        success: function(response) {
+            if (response.success) {
+                pamRestrictedProducts = response.data.products || [];
+                pamRestrictedProductUrls = response.data.product_urls || [];
+                pamRestrictedBrands = response.data.brands || [];
+                
+                // Trigger filter after data loads
+                pamFilterFiboResults();
+            }
+            pamIsLoading = false;
+        },
             error: function(xhr, status, error) {
-                console.error('[PAM FiboFilter] AJAX error:', status, error);
+                pamRestrictedProducts = [];
+                pamRestrictedProductUrls = [];
+                pamRestrictedBrands = [];
+                pamIsLoading = false;
             }
         });
     }
     
-    /**
-     * Filter FiboSearch results (comprehensive)
-     */
-    function pamFilterResults() {
-        console.log('[PAM FiboFilter] Filtering results...');
-        if (!pamDataLoaded || pamBlockedProducts.length === 0) {
-            console.log('[PAM FiboFilter] Skipping filter - data not loaded or no blocked products');
+    // Filter FiboSearch results
+    function pamFilterFiboResults() {
+        if (pamRestrictedProducts === null || pamRestrictedProducts.length === 0) {
             return;
         }
-        console.log('[PAM FiboFilter] Filtering with ' + pamBlockedProducts.length + ' blocked products');
         
-        var removedCount = 0;
+        var filteredProducts = 0;
+        var filteredBrands = 0;
         
-        // 1. Filter PRODUCT suggestions (left panel)
-        var productSelectors = [
-            '.dgwt-wcas-suggestion',
-            '.dgwt-wcas-suggestion-product',
-            '.dgwt-wcas-sp',
-            '.autocomplete-suggestion[data-index]'
-        ];
+        var $suggestions = $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp');
         
-        $(productSelectors.join(', ')).each(function() {
+        // 1. Filter product suggestions
+        $suggestions.each(function() {
             var $item = $(this);
+            
+            // Skip if already removed
             if ($item.data('pam-removed')) {
                 return;
             }
             
-            // Extract product ID - try multiple methods
-            var productId = $item.attr('data-post-id') || 
-                           $item.attr('data-product-id') ||
-                           $item.find('a').attr('data-post-id') ||
-                           $item.find('a').attr('data-product-id');
+            // Skip taxonomy items
+            if ($item.hasClass('dgwt-wcas-suggestion-taxonomy') || $item.closest('.dgwt-wcas-suggestion-taxonomy').length) {
+                return;
+            }
             
-            // Try URL extraction if no ID found
+            // Get product ID
+            var productId = $item.data('post-id') || $item.data('product-id') || $item.attr('data-post-id') || $item.attr('data-product-id');
+            
             if (!productId) {
-                var $link = $item.find('a').first();
-                if ($link.length) {
-                    var href = $link.attr('href') || '';
-                    // Try multiple URL patterns
-                    var patterns = [
-                        /[\?&]product_id=(\d+)/,
-                        /\/product\/.*?[\?&]p=(\d+)/,
-                        /\/(\d+)\/?$/
-                    ];
-                    for (var i = 0; i < patterns.length; i++) {
-                        var match = href.match(patterns[i]);
-                        if (match) {
-                            productId = match[1];
-                            break;
-                        }
-                    }
+                var url = $item.find('a').first().attr('href') || '';
+                var match = url.match(/[?&]p=(\d+)|\/product\/[^\/]+\/(\d+)|post_type=product.*?(\d+)/);
+                if (match) {
+                    productId = parseInt(match[1] || match[2] || match[3]);
                 }
             }
             
-            if (productId && pamBlockedProducts.indexOf(parseInt(productId)) !== -1) {
-                console.log('[PAM FiboFilter] Removing product ' + productId);
+            if (productId && pamRestrictedProducts.indexOf(parseInt(productId)) !== -1) {
                 $item.data('pam-removed', true);
                 $item.remove();
-                removedCount++;
+                filteredProducts++;
             }
         });
         
-        // 2. Filter TAXONOMY suggestions (brands/tags with Vimergy)
+        // 2. Filter taxonomy suggestions (brands/tags)
         var taxonomySelectors = [
             '.dgwt-wcas-suggestion-taxonomy',
-            '.dgwt-wcas-st'
+            '.dgwt-wcas-st',
+            '.js-dgwt-wcas-suggestion',
+            '.dgwt-wcas-suggestion',
+            'li[class*="taxonomy"]',
+            'li[class*="brand"]',
+            '.dgwt-wcas-suggestions-wrapp li'
         ];
         
-        $(taxonomySelectors.join(', ')).each(function() {
+        var $taxonomies = $(taxonomySelectors.join(', '));
+        
+        $taxonomies.each(function() {
             var $item = $(this);
-            if ($item.data('pam-removed')) {
+            
+            // Skip if already processed
+            if ($item.data('pam-processed')) {
                 return;
             }
+            $item.data('pam-processed', true);
             
-            var text = $item.text().toLowerCase();
-            // Remove if contains "vimergy" or other restricted brands
-            if (text.indexOf('vimergy') !== -1) {
-                console.log('[PAM FiboFilter] Removing taxonomy item: ' + text);
-                $item.data('pam-removed', true);
-                $item.remove();
-                removedCount++;
+            var text = $item.text().toLowerCase().trim();
+            
+            // Check if this is a restricted brand
+            for (var i = 0; i < pamRestrictedBrands.length; i++) {
+                var brand = pamRestrictedBrands[i].toLowerCase();
+                if (text.indexOf(brand) !== -1) {
+                    $item.data('pam-removed', true);
+                    $item.remove();
+                    filteredBrands++;
+                    break;
+                }
             }
         });
         
-        // 3. Filter RIGHT PANEL details (hover/selection view)
+        // 3. Filter RIGHT PANEL details - match URLs directly with restricted product URLs
         $('.dgwt-wcas-details-wrapp .dgwt-wcas-details-inner').each(function() {
-            var $details = $(this);
-            if ($details.data('pam-removed')) {
+            var $detailsInner = $(this);
+            
+            // Skip if already removed
+            if ($detailsInner.data('pam-removed')) {
                 return;
             }
             
+            // Find product links in the details panel
+            var $productLinks = $detailsInner.find('a[href*="/product/"]');
             var shouldRemove = false;
             
-            // Check all product links in details
-            $details.find('a').each(function() {
-                var href = $(this).attr('href') || '';
-                var productId = $(this).attr('data-post-id') || $(this).attr('data-product-id');
+            // Check if any link in the details panel matches a restricted product URL
+            $productLinks.each(function() {
+                var url = $(this).attr('href') || '';
                 
-                // Try to extract ID from URL if not in attribute
-                if (!productId && href.indexOf('/product/') !== -1) {
-                    var patterns = [
-                        /[\?&]product_id=(\d+)/,
-                        /\/product\/.*?[\?&]p=(\d+)/,
-                        /\/(\d+)\/?$/
-                    ];
-                    for (var i = 0; i < patterns.length; i++) {
-                        var match = href.match(patterns[i]);
-                        if (match) {
-                            productId = match[1];
-                            break;
-                        }
+                // Normalize URLs for comparison (remove trailing slash, query params, etc.)
+                var normalizedUrl = url.split('?')[0].replace(/\/$/, '');
+                
+                // Check if this URL matches any restricted product URL
+                for (var i = 0; i < pamRestrictedProductUrls.length; i++) {
+                    var restrictedUrl = pamRestrictedProductUrls[i].split('?')[0].replace(/\/$/, '');
+                    
+                    if (normalizedUrl === restrictedUrl) {
+                        shouldRemove = true;
+                        return false; // break
                     }
                 }
                 
-                if (productId && pamBlockedProducts.indexOf(parseInt(productId)) !== -1) {
-                    shouldRemove = true;
-                    return false; // break
-                }
-                
-                // Also check text for brand names
-                var text = $(this).text().toLowerCase();
-                if (text.indexOf('vimergy') !== -1) {
-                    shouldRemove = true;
-                    return false;
+                if (shouldRemove) {
+                    return false; // break outer loop
                 }
             });
             
             if (shouldRemove) {
-                console.log('[PAM FiboFilter] Removing details panel');
-                $details.data('pam-removed', true);
-                $details.remove();
-                removedCount++;
+                $detailsInner.data('pam-removed', true);
+                $detailsInner.remove();
                 
-                // Hide wrapper if no details left
-                var $wrapper = $('.dgwt-wcas-details-wrapp');
-                if ($wrapper.find('.dgwt-wcas-details-inner:visible').length === 0) {
-                    $wrapper.hide();
+                // Also hide the entire details wrapper if it's empty
+                var $detailsWrapp = $('.dgwt-wcas-details-wrapp');
+                if ($detailsWrapp.find('.dgwt-wcas-details-inner:visible').length === 0) {
+                    $detailsWrapp.hide();
                 }
             }
         });
         
-        console.log('[PAM FiboFilter] Removed ' + removedCount + ' items total');
-    }
-    
-    /**
-     * Initialize filtering
-     */
-    function pamInit() {
-        // Load blocked products immediately
-        pamLoadBlockedProducts();
-        
-        // Filter after AJAX completes
-        $(document).ajaxComplete(function(event, xhr, settings) {
-            if (settings.url && settings.url.indexOf('dgwt-wcas') !== -1) {
-                // Small delay to let FiboSearch render
-                setTimeout(pamFilterResults, 50);
-                setTimeout(pamFilterResults, 200);
-                setTimeout(pamFilterResults, 500);
+        // 4. Remove empty groups
+        $('.dgwt-wcas-suggestion-group').each(function() {
+            var $group = $(this);
+            if ($group.find('.dgwt-wcas-suggestion:visible, .dgwt-wcas-st:visible').length === 0) {
+                $group.hide();
             }
         });
-        
-        // Also use MutationObserver for DOM changes
-        if (window.MutationObserver) {
-            var observer = new MutationObserver(function() {
-                pamFilterResults();
-            });
-            
-            var searchContainer = document.querySelector('.dgwt-wcas-search-wrapp');
-            if (searchContainer) {
-                observer.observe(searchContainer, {
-                    childList: true,
-                    subtree: true
-                });
-            }
-        }
     }
     
-    // Initialize when ready
-    $(document).ready(pamInit);
-    
+    // Initialize
+    $(document).ready(function() {
+        pamFetchRestrictedProducts();
+        
+        // Watch for results using MutationObserver
+        var observer = new MutationObserver(function() {
+            pamFilterFiboResults();
+        });
+        
+        var containers = document.querySelectorAll('.dgwt-wcas-suggestions-wrapp, .dgwt-wcas-search-wrapp, .dgwt-wcas-preloader');
+        containers.forEach(function(container) {
+            observer.observe(container, {
+                childList: true,
+                subtree: true
+            });
+        });
+        
+        // Backup filter trigger - run after AJAX completes
+        // Run multiple times with delays to catch FiboSearch re-renders
+        $(document).ajaxComplete(function(event, xhr, settings) {
+            if (settings.url && (settings.url.indexOf('dgwt_wcas') !== -1 || settings.url.indexOf('action=dgwt') !== -1)) {
+                pamFilterFiboResults(); // Immediate
+                setTimeout(pamFilterFiboResults, 50);  // After 50ms
+                setTimeout(pamFilterFiboResults, 150); // After 150ms
+                setTimeout(pamFilterFiboResults, 300); // After 300ms
+            }
+        });
+    });
 })(jQuery);
 

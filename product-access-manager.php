@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.5.5
+ * Version: 2.5.6
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -89,10 +89,10 @@ add_action( 'init', function () {
 add_action( 'plugins_loaded', function () {
     // NOTE: We do NOT prevent indexing because authorized users need to search too!
     
-    // Client-side filtering (works reliably even in SHORTINIT mode)
+    // Client-side filtering (PRIMARY method for FiboSearch due to SHORTINIT mode)
     add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
-    add_action( 'wp_ajax_pam_get_blocked_products', 'pam_ajax_get_blocked_products' );
-    add_action( 'wp_ajax_nopriv_pam_get_blocked_products', 'pam_ajax_get_blocked_products' );
+    add_action( 'wp_ajax_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
+    add_action( 'wp_ajax_nopriv_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
     
     pam_log( 'FiboSearch hooks registered' );
 }, 5 );
@@ -786,26 +786,75 @@ function pam_enqueue_fibo_filter_script() {
 }
 
 /**
- * AJAX handler: Get blocked products for current user
- * 
- * Returns array of product IDs that should be hidden from current user.
- * Uses 30-minute cache for performance!
+ * AJAX handler: Get restricted products and brands for current user
  */
-function pam_ajax_get_blocked_products() {
+function pam_ajax_get_restricted_data() {
     // Clean output buffer to prevent PHP notices from breaking JSON
     while ( ob_get_level() > 0 ) {
         ob_end_clean();
     }
     ob_start();
     
-    // Get blocked products from cache (fast!)
-    $blocked_products = pam_get_blocked_products_cached();
+    $restricted_product_ids = pam_get_restricted_product_ids();
+    $restricted_brands = pam_get_restricted_brand_names();
     
-    pam_log( 'AJAX: Returning ' . count( $blocked_products ) . ' blocked products for filtering' );
+    // Get product URLs for client-side matching
+    $restricted_product_urls = [];
+    foreach ( $restricted_product_ids as $product_id ) {
+        $restricted_product_urls[] = get_permalink( $product_id );
+    }
+    
+    pam_log( 'AJAX: Returning ' . count( $restricted_product_ids ) . ' restricted products, ' . count( $restricted_brands ) . ' brands' );
     
     // Clean any output before sending JSON
     ob_end_clean();
     
-    wp_send_json_success( $blocked_products );
-    exit; // Ensure clean exit
+    wp_send_json_success( array(
+        'products' => $restricted_product_ids,
+        'product_urls' => $restricted_product_urls,
+        'brands' => $restricted_brands,
+    ) );
+    exit;
+}
+
+/**
+ * Get restricted brand names for current user
+ * 
+ * @return array Array of brand names that current user cannot see
+ */
+function pam_get_restricted_brand_names() {
+    if ( pam_user_has_full_access() ) {
+        return [];
+    }
+    
+    // Get restricted catalogs from centralized function
+    $restricted_catalogs_list = pam_get_restricted_catalogs();
+    
+    // Get user's accessible catalogs
+    $accessible_catalogs = [];
+    if ( is_user_logged_in() ) {
+        $user = wp_get_current_user();
+        foreach ( $user->roles as $role ) {
+            if ( strpos( $role, 'access-' ) === 0 ) {
+                // Convert role to catalog
+                // "access-vimergy-user" → "Vimergy_catalog"
+                $brand = str_replace( array( 'access-', '-user' ), '', $role );
+                $accessible_catalogs[] = ucfirst( $brand ) . '_catalog';
+            }
+        }
+    }
+    
+    // Get restricted catalogs (ones user can't access)
+    // Only consider catalogs that are actually restricted (not HP/DCG)
+    $restricted_catalogs = array_diff( $restricted_catalogs_list, $accessible_catalogs );
+    
+    // Convert to brand names for display filtering
+    $restricted_brands = [];
+    foreach ( $restricted_catalogs as $catalog ) {
+        // "Vimergy_catalog" → "Vimergy"
+        $brand = str_replace( '_catalog', '', $catalog );
+        $restricted_brands[] = $brand;
+    }
+    
+    return $restricted_brands;
 }
