@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.6.2
+ * Version: 2.6.3
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.6.2' );
+define( 'PAM_VERSION', '2.6.3' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -753,12 +753,18 @@ function pam_get_restricted_product_ids() {
         return [];
     }
     
+    // Set flag to prevent our wc_get_products filter from running during this call
+    $GLOBALS['pam_building_cache'] = true;
+    
     // Get all products with site_catalog ACF field set
     $all_products = wc_get_products([
         'limit' => -1,
         'return' => 'ids',
         'status' => 'publish',
     ]);
+    
+    // Clear flag
+    unset( $GLOBALS['pam_building_cache'] );
     
     pam_log( 'Checking ' . count( $all_products ) . ' total products for restrictions' );
     
@@ -926,25 +932,18 @@ function pam_get_restricted_brand_names() {
  * @return array Modified query arguments with post__not_in exclusion
  */
 function pam_filter_wc_get_products( $wp_query_args, $query_vars ) {
-    // Prevent infinite recursion: Skip if we're building the cache
-    static $is_building_cache = false;
-    if ( $is_building_cache ) {
-        return $wp_query_args;
-    }
-    
     // Skip for admins
     if ( current_user_can( 'manage_woocommerce' ) ) {
         return $wp_query_args;
     }
     
-    // Set flag to prevent recursion during cache build
-    $is_building_cache = true;
+    // Prevent infinite recursion: Skip if we're inside pam_get_restricted_product_ids()
+    if ( ! empty( $GLOBALS['pam_building_cache'] ) ) {
+        return $wp_query_args;
+    }
     
     // Get blocked products from cache (same as shop/search queries)
     $blocked_products = pam_get_blocked_products_cached();
-    
-    // Clear flag
-    $is_building_cache = false;
     
     if ( empty( $blocked_products ) ) {
         return $wp_query_args;
