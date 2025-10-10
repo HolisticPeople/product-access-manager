@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.6.7
+ * Version: 2.7.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.6.7' );
+define( 'PAM_VERSION', '2.7.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -420,16 +420,132 @@ function pam_clear_blocked_products_cache( $user_id = null ) {
  * Clear Product Slider Pro transients
  * 
  * The slider caches its HTML output in transients with keys like 'spwps_HASH'.
- * When guest cache is cleared, also clear slider cache to prevent showing old HTML.
+ * We create user-aware versions with suffixes like '_guest', '_vimergy', etc.
  */
 function pam_clear_slider_transients() {
     global $wpdb;
     
-    // Delete all slider transients
+    // Delete all slider transients (all user types)
     $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_spwps_%'" );
     $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%_transient_timeout_spwps_%'" );
     
-    pam_log( 'Cleared Product Slider transients' );
+    pam_log( 'Cleared ALL slider transients (all user access types)' );
+}
+
+// ============================================================================
+// SLIDER CACHE: USER-AWARE TRANSIENTS
+// ============================================================================
+
+/**
+ * Make slider cache user-aware by intercepting transient operations
+ * 
+ * The slider plugin caches HTML in transients without considering user roles.
+ * We intercept get/set operations and add user-specific suffixes to cache keys.
+ * 
+ * Cache key examples:
+ * - spwps_abc123_guest (no access)
+ * - spwps_abc123_vimergy (access-vimergy-user role)
+ * - spwps_abc123_gaia (access-gaia-user role)
+ * - spwps_abc123_gaia_vimergy (both roles, sorted alphabetically)
+ * - spwps_abc123_admin (admin, sees everything)
+ */
+
+/**
+ * Intercept slider transient GET operations
+ */
+function pam_get_user_aware_slider_transient( $pre_transient, $transient ) {
+    // Only intercept slider transients
+    if ( strpos( $transient, 'spwps_' ) !== 0 ) {
+        return $pre_transient;
+    }
+    
+    // Get user-specific cache key
+    $user_suffix = pam_get_user_cache_suffix();
+    $user_transient = $transient . $user_suffix;
+    
+    // Try to get user-specific cache from database directly
+    $user_value = get_option( '_transient_' . $user_transient );
+    
+    if ( $user_value !== false ) {
+        pam_log( 'Slider cache HIT for: ' . $user_suffix );
+        return $user_value;
+    }
+    
+    pam_log( 'Slider cache MISS for: ' . $user_suffix );
+    // Return false to indicate cache miss
+    return false;
+}
+add_filter( 'pre_transient', 'pam_get_user_aware_slider_transient', 10, 2 );
+
+/**
+ * Intercept slider transient SET operations
+ */
+function pam_set_user_aware_slider_transient( $value, $expiration, $transient ) {
+    // Only intercept slider transients
+    if ( strpos( $transient, 'spwps_' ) !== 0 ) {
+        return $value;
+    }
+    
+    // Get user-specific cache key
+    $user_suffix = pam_get_user_cache_suffix();
+    $user_transient = $transient . $user_suffix;
+    
+    // Save to user-specific transient
+    set_transient( $user_transient, $value, $expiration );
+    pam_log( 'Slider cache SAVED for: ' . $user_suffix );
+    
+    // Prevent saving to original key by returning false
+    return false;
+}
+add_filter( 'pre_set_transient', 'pam_set_user_aware_slider_transient', 10, 3 );
+
+/**
+ * Get cache key suffix based on user's accessible catalogs
+ * 
+ * Creates unique suffix for each combination of catalog access:
+ * - _guest (no access)
+ * - _vimergy (has Vimergy access only)
+ * - _gaia (has Gaia access only)  
+ * - _gaia_vimergy (has both, alphabetically sorted)
+ * - _admin (admin, sees all)
+ * 
+ * @return string Cache suffix like '_guest', '_vimergy', etc.
+ */
+function pam_get_user_cache_suffix() {
+    // Admin users see everything
+    if ( current_user_can( 'manage_woocommerce' ) ) {
+        return '_admin';
+    }
+    
+    // For logged-in users, create suffix based on their accessible catalogs
+    if ( is_user_logged_in() ) {
+        $user_id = get_current_user_id();
+        $user = get_userdata( $user_id );
+        
+        if ( ! $user ) {
+            return '_guest';
+        }
+        
+        $accessible_brands = array();
+        foreach ( $user->roles as $role ) {
+            if ( strpos( $role, 'access-' ) === 0 ) {
+                // Convert role to brand name
+                // "access-vimergy-user" → "vimergy"
+                // "access-gaia-user" → "gaia"
+                $brand = str_replace( array( 'access-', '-user' ), '', $role );
+                $accessible_brands[] = strtolower( $brand );
+            }
+        }
+        
+        if ( ! empty( $accessible_brands ) ) {
+            // Sort for consistency: user with [vimergy, gaia] and [gaia, vimergy] get same cache
+            sort( $accessible_brands );
+            return '_' . implode( '_', $accessible_brands );
+        }
+    }
+    
+    // Guests and users without access roles
+    return '_guest';
 }
 
 /**
