@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.7.1
+ * Version: 2.7.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.7.1' );
+define( 'PAM_VERSION', '2.7.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -487,29 +487,27 @@ function pam_set_user_aware_slider_transient( $value, $expiration, $transient ) 
     return false;
 }
 
-/**
- * Register dynamic filters for all slider transients
- * 
- * We can't use static filter names because slider transient names are dynamic (include MD5 hash).
- * Instead, we hook into WordPress's internal transient mechanism.
- */
-add_action( 'init', function() {
-    // Hook into WordPress transient system at a low level
-    // This catches ALL get_transient() and set_transient() calls
-    add_filter( 'pre_transient', function( $value, $transient ) {
-        if ( strpos( $transient, 'spwps_' ) === 0 ) {
-            return pam_get_user_aware_slider_transient( $value, $transient );
-        }
-        return $value;
-    }, 10, 2 );
-    
-    add_filter( 'pre_set_transient', function( $value, $transient, $expiration ) {
-        if ( strpos( $transient, 'spwps_' ) === 0 ) {
-            return pam_set_user_aware_slider_transient( $value, $expiration, $transient );
-        }
-        return $value;
-    }, 10, 3 );
-}, 1 );
+// DISABLE slider caching entirely to prevent cross-user cache contamination
+// The slider caches HTML without user context, causing unauthorized users to see
+// cached HTML built for authorized users (and vice versa).
+// Our wc_get_products() filter already provides fast product filtering.
+add_filter( 'pre_transient', function( $value, $transient ) {
+    if ( strpos( $transient, 'spwps_' ) === 0 ) {
+        pam_log( 'Slider cache disabled for: ' . $transient );
+        // Return false to force cache miss - slider will rebuild every time
+        return false;
+    }
+    return $value;
+}, 10, 2 );
+
+add_filter( 'pre_set_transient', function( $value, $transient, $expiration ) {
+    if ( strpos( $transient, 'spwps_' ) === 0 ) {
+        pam_log( 'Slider cache save blocked for: ' . $transient );
+        // Return false to prevent caching - rely on wc_get_products filter instead
+        return false;
+    }
+    return $value;
+}, 10, 3 );
 
 /**
  * Get cache key suffix based on user's accessible catalogs
