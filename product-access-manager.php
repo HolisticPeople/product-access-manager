@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.6.6
+ * Version: 2.6.7
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.6.6' );
+define( 'PAM_VERSION', '2.6.7' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -387,15 +387,15 @@ function pam_user_has_any_access_role( $user_id ) {
     }
     $user = get_userdata( $user_id );
     if ( ! $user ) {
-            return false;
-        }
+        return false;
+    }
     foreach ( $user->roles as $role ) {
         if ( strpos( $role, 'access-' ) === 0 ) {
             return true;
         }
     }
-            return false;
-        }
+        return false;
+    }
 
 /**
  * Clear cached blocked products for user
@@ -409,10 +409,11 @@ function pam_clear_blocked_products_cache( $user_id = null ) {
     } else {
         delete_transient( 'pam_hidden_products_guest' );
         pam_log( 'Cleared cache for guests' );
-        
-        // Also clear Product Slider Pro cache (it caches HTML output)
-        pam_clear_slider_transients();
     }
+    
+    // Always clear Product Slider Pro cache (it doesn't differentiate users in cache keys)
+    // This ensures authorized users see their products immediately after login
+    pam_clear_slider_transients();
 }
 
 /**
@@ -579,8 +580,8 @@ function pam_user_can_view( $product, $user_id = null ) {
     $user = get_userdata( $user_id );
     if ( ! $user ) {
         pam_log( 'Invalid user ID ' . $user_id . ' - denying access' );
-        return false;
-    }
+            return false;
+        }
 
     foreach ( $required_roles as $role ) {
         if ( in_array( $role, $user->roles ) ) {
@@ -615,7 +616,7 @@ function pam_reveal_product( $visible, $product_id ) {
         pam_log( 'Revealing restricted product ' . $product_id . ' to authorized user' );
         return true;
     }
-    
+
     // Otherwise keep WC default (hidden)
     pam_log( 'Keeping product ' . $product_id . ' hidden from unauthorized user' );
     return $visible;
