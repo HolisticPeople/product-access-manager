@@ -55,15 +55,12 @@ jobs:
           echo "environment=$ENV" >> $GITHUB_OUTPUT
 
       - name: Setup SSH key
-        env:
-          SSH_KEY_STAGING: ${{ secrets.KINSTA_SSH_KEY }}
-          SSH_KEY_PROD: ${{ secrets.KINSTAPROD_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
           if [ "${{ steps.vars.outputs.environment }}" = "production" ]; then
-            echo "$SSH_KEY_PROD" > ~/.ssh/kinsta_key
+            echo "${{ secrets.KINSTAPROD_SSH_KEY }}" > ~/.ssh/kinsta_key
           else
-            echo "$SSH_KEY_STAGING" > ~/.ssh/kinsta_key
+            echo "${{ secrets.KINSTA_SSH_KEY }}" > ~/.ssh/kinsta_key
           fi
           chmod 600 ~/.ssh/kinsta_key
           ssh-keyscan -p ${{ steps.vars.outputs.port }} ${{ steps.vars.outputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
