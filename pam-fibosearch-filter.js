@@ -1,9 +1,10 @@
 /**
- * Product Access Manager - FiboSearch Client-Side Filtering
- * Version: 2.2.0
+ * Product Access Manager - FiboSearch Dropdown Filtering
+ * Version: 2.5.0
  * 
- * Filters FiboSearch results on the client-side because FiboSearch uses SHORTINIT mode
- * which bypasses our server-side PHP filters.
+ * Filters ONLY FiboSearch dropdown results (AJAX suggestions).
+ * Search results page is handled server-side via pre_get_posts.
+ * Dropdown uses SHORTINIT mode which bypasses server-side filters.
  * 
  * Production ready - all debug logging removed.
  */
@@ -58,6 +59,7 @@
         var filteredProducts = 0;
         var filteredBrands = 0;
         
+        // DROPDOWN: Filter suggestion products
         var $suggestions = $('.dgwt-wcas-suggestion-product, .dgwt-wcas-suggestion, .dgwt-wcas-sp');
         
         // 1. Filter product suggestions
@@ -188,17 +190,19 @@
     $(document).ready(function() {
         pamFetchRestrictedProducts();
         
-        // Watch for results using MutationObserver
+        // Watch for dropdown results using MutationObserver
         var observer = new MutationObserver(function() {
             pamFilterFiboResults();
         });
         
         var containers = document.querySelectorAll('.dgwt-wcas-suggestions-wrapp, .dgwt-wcas-search-wrapp, .dgwt-wcas-preloader');
         containers.forEach(function(container) {
-            observer.observe(container, {
-                childList: true,
-                subtree: true
-            });
+            if (container) {
+                observer.observe(container, {
+                    childList: true,
+                    subtree: true
+                });
+            }
         });
         
         // Backup filter trigger - run after AJAX completes

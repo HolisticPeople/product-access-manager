@@ -338,14 +338,23 @@ product-access-manager/
 
 ## Security
 
-**Fail-safe design:**
-- If uncertain → Hide products (secure default)
-- Admins → Always see everything
-- Cache isolation → No user data leakage
-- Capability checks → Consistent permission validation
+⚠️ **Important: NOT Fail-Safe**
 
-**Current design note:**
-Products with `site_catalog` set to restricted catalogs are still "visible" in WooCommerce. The plugin filters them from queries. If plugin fails, products remain visible (not a fail-secure design for product visibility itself).
+This plugin is **NOT fail-safe** from a security perspective:
+- Products remain set to "visible" in WooCommerce
+- Plugin filters hide them dynamically
+- **If plugin fails or is disabled, restricted products become visible to everyone**
+
+**For fail-safe security**, you would need to:
+- Set restricted products to "hidden" in WooCommerce
+- Have the plugin REVEAL them to authorized users (opposite approach)
+
+**Current Security Features:**
+- ✅ Admins always see everything
+- ✅ Cache isolation (no user data leakage)
+- ✅ Capability checks (consistent permission validation)
+- ✅ Multiple filter layers (visibility, purchase, direct access)
+- ⚠️ Relies on plugin being active and working
 
 ---
 

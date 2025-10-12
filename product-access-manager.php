@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.8.1
+ * Version: 2.15.0
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.8.1' );
+define( 'PAM_VERSION', '2.15.0' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -72,7 +72,8 @@ add_action( 'init', function () {
     add_action( 'template_redirect', 'pam_protect_single_product' );
     
     // Query filters (reveal restricted products to authorized users)
-    add_action( 'pre_get_posts', 'pam_modify_query' );
+    add_action( 'pre_get_posts', 'pam_modify_query', 5 ); // Priority 5 - run early
+    add_action( 'pre_get_posts', 'pam_filter_fibosearch_post_in', 900002 ); // AFTER FiboSearch (priority 900001)
     
     // Filter wc_get_products() calls (catches sliders, widgets, related products, etc.)
     add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_wc_get_products', 10, 2 );
@@ -81,23 +82,26 @@ add_action( 'init', function () {
     add_action( 'wp_login', 'pam_clear_user_cache_on_login', 10, 2 );
     add_action( 'wp_logout', 'pam_clear_user_cache_on_logout' );
     add_action( 'set_user_role', 'pam_clear_user_cache_on_role_change', 10, 3 );
+    add_action( 'add_user_role', 'pam_clear_user_cache_on_role_add', 10, 2 );
+    add_action( 'remove_user_role', 'pam_clear_user_cache_on_role_remove', 10, 2 );
     
     pam_log( 'WooCommerce hooks registered' );
 } );
 
 /**
- * Initialize FiboSearch integration
- * Runs early on plugins_loaded to ensure filters are active during AJAX
+ * Initialize FiboSearch dropdown filtering (client-side only)
+ * 
+ * ARCHITECTURE NOTE:
+ * - Search results page: Handled by pam_filter_fibosearch_post_in() at priority 900002
+ * - Dropdown: Handled by client-side JS (SHORTINIT mode bypasses PHP hooks)
  */
 add_action( 'plugins_loaded', function () {
-    // NOTE: We do NOT prevent indexing because authorized users need to search too!
-    
-    // Client-side filtering (PRIMARY method for FiboSearch due to SHORTINIT mode)
+    // Client-side filtering for dropdown (SHORTINIT mode)
     add_action( 'wp_enqueue_scripts', 'pam_enqueue_fibo_filter_script' );
     add_action( 'wp_ajax_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
     add_action( 'wp_ajax_nopriv_pam_get_restricted_data', 'pam_ajax_get_restricted_data' );
     
-    pam_log( 'FiboSearch hooks registered' );
+    pam_log( 'FiboSearch dropdown filtering initialized (client-side)' );
 }, 5 );
 
 // ============================================================================
@@ -533,6 +537,28 @@ function pam_clear_user_cache_on_role_change( $user_id, $role, $old_roles ) {
     pam_clear_blocked_products_cache( $user_id );
 }
 
+/**
+ * Clear cache when role is added to user
+ * 
+ * @param int $user_id User ID
+ * @param string $role Role that was added
+ */
+function pam_clear_user_cache_on_role_add( $user_id, $role ) {
+    pam_clear_blocked_products_cache( $user_id );
+    pam_log( 'Cache cleared for user ' . $user_id . ' (role added: ' . $role . ')' );
+}
+
+/**
+ * Clear cache when role is removed from user
+ * 
+ * @param int $user_id User ID
+ * @param string $role Role that was removed
+ */
+function pam_clear_user_cache_on_role_remove( $user_id, $role ) {
+    pam_clear_blocked_products_cache( $user_id );
+    pam_log( 'Cache cleared for user ' . $user_id . ' (role removed: ' . $role . ')' );
+}
+
 // ============================================================================
 // PRODUCT RESTRICTION CHECKS
 // ============================================================================
@@ -665,7 +691,7 @@ function pam_user_can_view( $product, $user_id = null ) {
 
     pam_log( 'User ' . $user_id . ' does not have required roles for product ' . $product_id . ' - denying access' );
         return false;
-}
+    }
 
 // ============================================================================
 // PRODUCT VISIBILITY FILTERS (Reveal to Authorized)
@@ -758,19 +784,31 @@ function pam_protect_single_product() {
  * @param WP_Query $query WordPress query object
  */
 function pam_modify_query( $query ) {
+    // ONLY modify the main query - never touch secondary queries
+    if ( ! $query->is_main_query() ) {
+        return;
+    }
+    
     // Skip for admins
     if ( current_user_can( 'manage_woocommerce' ) ) {
         return;
     }
-
-    // Skip if not main query or not shop/archive/search
-    if ( ! $query->is_main_query() || ! ( $query->is_shop() || $query->is_product_taxonomy() || $query->is_search() ) ) {
-        return;
+    
+    // ONLY apply to shop/archive pages OR product search results
+    $should_filter = false;
+    
+    // 1. Shop and product archive pages
+    if ( $query->is_shop() || $query->is_product_taxonomy() ) {
+        $should_filter = true;
     }
-
-    // Skip if not product query
-    $post_types = $query->get( 'post_type' );
-    if ( ! empty( $post_types ) && ! in_array( 'product', (array) $post_types, true ) ) {
+    
+    // 2. Product search results ONLY (must have post_type=product in URL)
+    if ( isset( $_GET['post_type'] ) && $_GET['post_type'] === 'product' && ! empty( $_GET['s'] ) ) {
+        $should_filter = true;
+    }
+    
+    // Don't filter anything else
+    if ( ! $should_filter ) {
         return;
     }
     
@@ -778,14 +816,58 @@ function pam_modify_query( $query ) {
     $blocked_products = pam_get_blocked_products_cached();
     
     if ( empty( $blocked_products ) ) {
-        pam_log( 'No products to block for current user' );
         return;
     }
     
     // Exclude blocked products using post__not_in (fastest method)
     $query->set( 'post__not_in', $blocked_products );
+}
+
+/**
+ * Filter FiboSearch's post__in array to remove blocked products
+ * Runs AFTER FiboSearch (priority 900002 > 900001)
+ * 
+ * @param WP_Query $query WordPress query object
+ */
+function pam_filter_fibosearch_post_in( $query ) {
+    // Only run for main query
+    if ( ! $query->is_main_query() ) {
+        return;
+    }
     
-    pam_log( 'Excluded ' . count( $blocked_products ) . ' products from query' );
+    // Skip for admins
+    if ( current_user_can( 'manage_woocommerce' ) ) {
+        return;
+    }
+    
+    // Only process if FiboSearch has set post__in (they do this at priority 900001)
+    $post_in = $query->get( 'post__in' );
+    if ( empty( $post_in ) || ! is_array( $post_in ) ) {
+        return;
+    }
+    
+    // Check if this looks like a FiboSearch query (they set dgwt_wcas)
+    if ( ! $query->get( 'dgwt_wcas' ) ) {
+        return;
+    }
+    
+    // Get blocked products from cache
+    $blocked_products = pam_get_blocked_products_cached();
+    
+    if ( empty( $blocked_products ) ) {
+        return;
+    }
+    
+    // Filter out blocked products from FiboSearch's post__in array
+    $filtered_post_in = array_diff( $post_in, $blocked_products );
+    
+    // If all products were blocked, set to -1 (WordPress convention for "no results")
+    if ( empty( $filtered_post_in ) ) {
+        $filtered_post_in = array( -1 );
+    }
+    
+    // Update the query with filtered results
+    $query->set( 'post__in', array_values( $filtered_post_in ) );
 }
 
 // ============================================================================
@@ -801,26 +883,7 @@ function pam_modify_query( $query ) {
  * 2. Client-side JS for FiboSearch AJAX (SHORTINIT mode)
  */
 
-/**
- * Filter FiboSearch product suggestions - hide restricted products from unauthorized users
- * 
- * @param array|bool $suggestion Product suggestion data
- * @param int $post_id Product ID
- * @return array|bool Modified suggestion or false to hide
- */
-function pam_filter_fibo_product( $suggestion, $post_id ) {
-    // Use cached blocked products (same as WooCommerce queries)
-    $blocked_products = pam_get_blocked_products_cached();
-    
-    // If product is blocked for this user, hide it from FiboSearch
-    if ( in_array( $post_id, $blocked_products, true ) ) {
-        pam_log( 'FiboSearch: Hiding blocked product ' . $post_id );
-        return false; // Hide from results
-    }
-    
-    pam_log( 'FiboSearch: Showing product ' . $post_id );
-    return $suggestion; // Show in results
-}
+// REMOVED: pam_filter_fibo_product() - unused function, not hooked anywhere
 
 // ============================================================================
 // UTILITY FUNCTIONS (Kept for Backward Compatibility)
@@ -892,6 +955,15 @@ function pam_get_restricted_product_ids() {
 // FIBOSEARCH CLIENT-SIDE FILTERING (For SHORTINIT Mode)
 // ============================================================================
 
+// REMOVED: pam_filter_fibosearch_results() and pam_exclude_from_fibosearch()
+// These hooks never fired for FiboSearch search results page.
+//
+// REASON: FiboSearch uses pre_get_posts at priority 900001 to set post__in,
+// not the dgwt/wcas/tnt/search_results/products filter we tried to use.
+//
+// REPLACEMENT: pam_filter_fibosearch_post_in() at priority 900002 (see above)
+// filters the post__in array AFTER FiboSearch sets it.
+
 /**
  * Enqueue FiboSearch filtering script
  * 
@@ -899,18 +971,14 @@ function pam_get_restricted_product_ids() {
  * Required because FiboSearch runs in SHORTINIT mode (plugins don't load).
  */
 function pam_enqueue_fibo_filter_script() {
-    // Skip for admins - they should see all products
+    // Only skip for admins - they should see all products
     if ( current_user_can( 'manage_woocommerce' ) ) {
         pam_log( 'FiboSearch filter NOT enqueued - user is admin' );
         return;
     }
     
-    // Skip for authorized users with access roles - they should see their catalog products
-    if ( is_user_logged_in() && pam_user_has_any_access_role( get_current_user_id() ) ) {
-        pam_log( 'FiboSearch filter NOT enqueued - user has access role' );
-        return;
-    }
-    
+    // Enqueue for ALL other users (guests and authorized users)
+    // The filter will hide products based on what THIS specific user cannot see
     wp_enqueue_script(
         'pam-fibosearch-filter',
         plugins_url( 'pam-fibosearch-filter.js', __FILE__ ),
@@ -927,7 +995,12 @@ function pam_enqueue_fibo_filter_script() {
 }
 
 /**
- * AJAX handler: Get restricted products and brands for current user
+ * AJAX handler: Get blocked products for THIS specific user
+ * 
+ * Returns products that THIS user cannot see (user-specific filtering).
+ * - Guest: Returns all restricted products
+ * - User with access-vimergy-user: Returns all restricted products EXCEPT Vimergy
+ * - Admin: Returns empty (admins see everything, but shouldn't call this)
  */
 function pam_ajax_get_restricted_data() {
     // Clean output buffer to prevent PHP notices from breaking JSON
@@ -936,50 +1009,45 @@ function pam_ajax_get_restricted_data() {
     }
     ob_start();
     
-    // For AJAX: get ALL restricted products (don't check current user's access)
-    // The client-side filter needs to know what products are restricted, regardless of who's calling
+    // Get blocked products for THIS specific user (uses cache)
+    $user_id = get_current_user_id();
+    $blocked_product_ids = pam_get_blocked_products_cached( $user_id );
+    
+    // Get URLs for blocked products
+    $blocked_product_urls = [];
+    foreach ( $blocked_product_ids as $product_id ) {
+        $blocked_product_urls[] = get_permalink( $product_id );
+    }
+    
+    // Get brand names for blocked products
+    $blocked_brands = [];
     $restricted_catalogs = pam_get_restricted_catalogs();
-    $restricted_brands = pam_get_restricted_brand_names();
     
-    // Temporarily remove our filter to get ALL products
-    remove_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_wc_get_products', 10 );
-    
-    // Get all products with restricted catalogs
-    $all_products = wc_get_products([
-        'limit' => -1,
-        'return' => 'ids',
-        'status' => 'publish',
-    ]);
-    
-    // Re-add our filter
-    add_filter( 'woocommerce_product_data_store_cpt_get_products_query', 'pam_filter_wc_get_products', 10, 2 );
-    
-    $restricted_product_ids = [];
-    $restricted_product_urls = [];
-    
-    foreach ( $all_products as $product_id ) {
+    foreach ( $blocked_product_ids as $product_id ) {
         $product_catalog = get_field( 'site_catalog', $product_id );
         if ( $product_catalog ) {
             $catalogs = is_array( $product_catalog ) ? $product_catalog : array( $product_catalog );
             foreach ( $catalogs as $catalog ) {
                 if ( in_array( $catalog, $restricted_catalogs, true ) ) {
-                    $restricted_product_ids[] = $product_id;
-                    $restricted_product_urls[] = get_permalink( $product_id );
-                    break;
+                    // "Vimergy_catalog" → "Vimergy"
+                    $brand = str_replace( '_catalog', '', $catalog );
+                    if ( ! in_array( $brand, $blocked_brands, true ) ) {
+                        $blocked_brands[] = $brand;
+                    }
                 }
             }
         }
     }
     
-    pam_log( 'AJAX: Returning ' . count( $restricted_product_ids ) . ' restricted products, ' . count( $restricted_brands ) . ' brands' );
+    pam_log( 'AJAX: Returning ' . count( $blocked_product_ids ) . ' blocked products for user ' . $user_id . ', ' . count( $blocked_brands ) . ' brands' );
     
     // Clean any output before sending JSON
     ob_end_clean();
     
     wp_send_json_success( array(
-        'products' => $restricted_product_ids,
-        'product_urls' => $restricted_product_urls,
-        'brands' => $restricted_brands,
+        'products' => $blocked_product_ids,
+        'product_urls' => $blocked_product_urls,
+        'brands' => $blocked_brands,
     ) );
     exit;
 }
