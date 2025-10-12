@@ -63,7 +63,22 @@ jobs:
             echo "${{ secrets.KINSTA_SSH_KEY }}" > ~/.ssh/kinsta_key
           fi
           chmod 600 ~/.ssh/kinsta_key
+          
+          # Verify key format
+          echo "Verifying SSH key format..."
+          head -1 ~/.ssh/kinsta_key
+          tail -1 ~/.ssh/kinsta_key
+          
+          # Add host to known_hosts
           ssh-keyscan -p ${{ steps.vars.outputs.port }} ${{ steps.vars.outputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Test SSH connection
+        run: |
+          echo "Testing SSH connection to ${{ steps.vars.outputs.environment }}..."
+          ssh -i ~/.ssh/kinsta_key -p ${{ steps.vars.outputs.port }} \
+            -o StrictHostKeyChecking=no \
+            ${{ steps.vars.outputs.user }}@${{ steps.vars.outputs.host }} \
+            "echo 'SSH connection successful!'"
 
       - name: Deploy to ${{ steps.vars.outputs.environment }}
         run: |
