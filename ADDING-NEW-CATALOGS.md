@@ -26,6 +26,37 @@ The Product Access Manager uses **AUTOMATIC DETECTION** for restricted catalogs.
 
 ---
 
+## ⚠️ IMPORTANT: Naming Format (Case Sensitive!)
+
+**ACF catalog names ARE case sensitive and MUST follow this exact format:**
+
+✅ **CORRECT Format:** `{Brand}_catalog`
+- First letter of brand name: **Capital**
+- Rest of brand name: **lowercase**
+- Examples: `Vimergy_catalog`, `Gaia_catalog`, `Test_catalog`
+
+**Exceptions** (Multi-letter acronyms - all caps):
+- `HP_catalog`
+- `DCG_catalog`
+
+❌ **WRONG Formats (will NOT work):**
+- `vimergy_catalog` ← All lowercase
+- `VIMERGY_CATALOG` ← All caps
+- `ViMeRgY_catalog` ← Mixed case
+
+**WordPress Role names** (always all lowercase):
+- Format: `access-{brand}-user`
+- Examples: `access-vimergy-user`, `access-gaia-user`, `access-test-user`
+
+**Why This Matters:**
+The plugin uses `ucfirst()` to convert role names to catalog names, which means:
+- `access-vimergy-user` → `Vimergy_catalog`
+- If your ACF field has `vimergy_catalog` (lowercase), it won't match!
+
+See `CASE-SENSITIVITY-TEST.md` for detailed technical explanation.
+
+---
+
 ## How to Add a New Restricted Catalog
 
 ### Example: Adding "Gaia" as a restricted catalog
