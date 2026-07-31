@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.15.0
+ * Version: 2.15.1
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -18,6 +18,7 @@
  * @version 2.0.9 - FIX: Removed incorrect data-object attribute, restored exact v1.9.0 ID extraction and selectors
  * @version 2.1.0 - Added filtering for FiboSearch right panel (details view on hover/selection)
  * @version 2.1.1 - FIX: Run filter multiple times with delays to catch FiboSearch re-renders
+ * @version 2.15.1 - Added typed allow/deny/unknown product access contract and gate precedence correction
  * @author Amnon Manneberg
  */
 
@@ -27,7 +28,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define plugin constants
-define( 'PAM_VERSION', '2.15.0' );
+define( 'PAM_VERSION', '2.15.1' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 

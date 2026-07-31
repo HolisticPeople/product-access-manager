@@ -112,6 +112,18 @@ pam_test( 'public catalog returns allow', function () {
     pam_assert_same( 'passthrough', $contract['purchase_effect'], 'Allow should preserve downstream purchase truth.' );
 } );
 
+pam_test( 'plugin header and constant versions match release version', function () {
+    $plugin_source = file_get_contents( dirname( __DIR__ ) . '/product-access-manager.php' );
+
+    if ( ! preg_match( '/^[ \t]*\*[ \t]+Version:[ \t]+([0-9.]+)/m', $plugin_source, $matches ) ) {
+        throw new RuntimeException( 'Plugin header version was not found.' );
+    }
+
+    pam_assert_same( '2.15.1', $matches[1], 'Plugin header should use release version.' );
+    pam_assert_same( '2.15.1', PAM_VERSION, 'PAM_VERSION should use release version.' );
+    pam_assert_same( $matches[1], PAM_VERSION, 'Plugin header Version and PAM_VERSION should match.' );
+} );
+
 pam_test( 'restricted guest returns deny', function () {
     $GLOBALS['pam_test_product_catalogs'][201] = array( 'Vimergy_catalog' );
 

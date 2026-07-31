@@ -2,7 +2,7 @@
 
 Owner: `product-access-manager`
 Contract version: `1.0`
-Runtime version posture: no plugin version bump in this onboarding PR; plugin header remains `2.15.0`.
+Runtime version posture: plugin patch version bumped to `2.15.1` because this PR adds public runtime helpers and corrects access-gate precedence.
 
 ## Product Access Contract
 
