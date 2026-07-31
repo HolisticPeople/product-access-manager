@@ -1,0 +1,38 @@
+{
+  "plugin": "product-access-manager",
+  "repo": "HolisticPeople/product-access-manager",
+  "schema_version": "1.0",
+  "owns": [
+    "ACF site_catalog based WooCommerce product access classification",
+    "public vs restricted catalog access decisions",
+    "restricted catalog to access role mapping",
+    "fail-soft product access contract: allow, deny, unknown",
+    "WooCommerce product visibility and purchasability access gates"
+  ],
+  "must_not_own": [
+    "stock truth or inventory reservation state",
+    "cart, checkout, payment, or order state",
+    "authentication or session source truth",
+    "HP-Zen native product page rendering",
+    "cross-plugin source mutation without registered contract"
+  ],
+  "consumes": [
+    "WooCommerce product objects, visibility, and purchasability hooks",
+    "ACF site_catalog product field",
+    "WordPress current-user capability and role APIs"
+  ],
+  "exposes": {
+    "cpts": [],
+    "rest": [],
+    "shortcodes": [],
+    "providers": []
+  },
+  "verification": {
+    "staging": {
+      "status": "unverified"
+    },
+    "production": {
+      "status": "unverified"
+    }
+  }
+}
