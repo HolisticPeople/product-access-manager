@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.15.0
+ * Version: 2.15.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -18,6 +18,8 @@
  * @version 2.0.9 - FIX: Removed incorrect data-object attribute, restored exact v1.9.0 ID extraction and selectors
  * @version 2.1.0 - Added filtering for FiboSearch right panel (details view on hover/selection)
  * @version 2.1.1 - FIX: Run filter multiple times with delays to catch FiboSearch re-renders
+ * @version 2.15.1 - Added typed allow/deny/unknown product access contract and gate precedence correction
+ * @version 2.15.2 - Declared compatibility with WooCommerce High-Performance Order Storage
  * @author Amnon Manneberg
  */
 
@@ -26,13 +28,33 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+/**
+ * Declare compatibility with WooCommerce High-Performance Order Storage.
+ *
+ * Product Access Manager reads product catalog metadata only and does not read
+ * or write WooCommerce order storage directly.
+ */
+function pam_declare_hpos_compatibility() {
+    if ( class_exists( Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
+        Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility(
+            'custom_order_tables',
+            __FILE__,
+            true
+        );
+    }
+}
+add_action( 'before_woocommerce_init', 'pam_declare_hpos_compatibility' );
+
 // Define plugin constants
-define( 'PAM_VERSION', '2.15.0' );
+define( 'PAM_VERSION', '2.15.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 // Debug mode - set to false in production
 define( 'PAM_DEBUG', false );
+define( 'PAM_ACCESS_ALLOW', 'allow' );
+define( 'PAM_ACCESS_DENY', 'deny' );
+define( 'PAM_ACCESS_UNKNOWN', 'unknown' );
 
 /**
  * Debug logging function
@@ -45,6 +67,209 @@ if ( ! function_exists( 'pam_log' ) ) {
             error_log( '[PAM v' . $version . '] ' . $message );
         }
     }
+}
+
+/**
+ * Normalize a product input to a product ID for public contract calls.
+ *
+ * @param int|WC_Product $product Product ID or WooCommerce product object.
+ * @return int Product ID, or 0 when no usable product could be resolved.
+ */
+function pam_normalize_product_id( $product ) {
+    if ( class_exists( 'WC_Product' ) && $product instanceof WC_Product ) {
+        return (int) $product->get_id();
+    }
+
+    return absint( $product );
+}
+
+/**
+ * Convert an ACF catalog value to the matching access role.
+ *
+ * @param string $catalog Catalog value, e.g. Vimergy_catalog.
+ * @return string Role slug, e.g. access-vimergy-user.
+ */
+function pam_catalog_to_access_role( $catalog ) {
+    $brand = strtolower( str_replace( '_catalog', '', (string) $catalog ) );
+    return 'access-' . $brand . '-user';
+}
+
+/**
+ * Base shape for the public product-access contract.
+ *
+ * Product Access Manager owns only catalog/role access state. It does not own
+ * inventory, stock, cart admission, checkout, payment, order, or auth truth.
+ *
+ * @param int    $product_id Product ID.
+ * @param string $status Access status.
+ * @param string $reason Machine-readable reason.
+ * @return array Contract payload.
+ */
+function pam_build_product_access_contract( $product_id, $status, $reason ) {
+    return array(
+        'contract' => 'product-access-manager/product-access',
+        'version' => '1.0',
+        'status' => $status,
+        'reason' => $reason,
+        'product_id' => (int) $product_id,
+        'can_view' => PAM_ACCESS_DENY !== $status,
+        'purchase_effect' => PAM_ACCESS_DENY === $status ? 'deny' : 'passthrough',
+        'is_restricted' => null,
+        'catalogs' => array(),
+        'restricted_catalogs' => array(),
+        'required_roles' => array(),
+        'matched_roles' => array(),
+        'owner_boundaries' => array(
+            'access' => 'product-access-manager',
+            'stock' => 'WooCommerce/HP-Inventory',
+            'cart_checkout' => 'HP-Checkout',
+            'auth_session' => 'WordPress/HP-Login',
+        ),
+    );
+}
+
+/**
+ * Public fail-soft product-access contract.
+ *
+ * Status meanings:
+ * - allow: PAM evaluated catalog/role access and did not deny the product.
+ * - deny: PAM evaluated access and the current/supplied user lacks permission.
+ * - unknown: PAM could not evaluate access; callers may render fail-soft but
+ *   must continue to defer stock/cart/purchase truth to Woo/HP owners.
+ *
+ * @param int|WC_Product $product Product ID or WooCommerce product object.
+ * @param int|null       $user_id User ID, or null for the current user.
+ * @return array Access contract payload.
+ */
+function pam_get_product_access_contract( $product, $user_id = null ) {
+    $product_id = pam_normalize_product_id( $product );
+
+    if ( $product_id <= 0 ) {
+        return pam_build_product_access_contract( 0, PAM_ACCESS_UNKNOWN, 'invalid_product' );
+    }
+
+    if ( current_user_can( 'manage_woocommerce' ) ) {
+        $contract = pam_build_product_access_contract( $product_id, PAM_ACCESS_ALLOW, 'admin_override' );
+        $contract['is_restricted'] = false;
+        return $contract;
+    }
+
+    if ( ! function_exists( 'get_field' ) ) {
+        return pam_build_product_access_contract( $product_id, PAM_ACCESS_UNKNOWN, 'acf_unavailable' );
+    }
+
+    try {
+        $catalogs = get_field( 'site_catalog', $product_id );
+        $catalogs = array_values( array_filter( (array) $catalogs ) );
+        $restricted_catalogs = pam_get_restricted_catalogs();
+    } catch ( Throwable $e ) {
+        return pam_build_product_access_contract( $product_id, PAM_ACCESS_UNKNOWN, 'catalog_lookup_error' );
+    }
+
+    $required_roles = array();
+    foreach ( $catalogs as $catalog ) {
+        if ( in_array( $catalog, $restricted_catalogs, true ) ) {
+            $required_roles[] = pam_catalog_to_access_role( $catalog );
+        }
+    }
+    $required_roles = array_values( array_unique( $required_roles ) );
+
+    if ( empty( $required_roles ) ) {
+        $contract = pam_build_product_access_contract( $product_id, PAM_ACCESS_ALLOW, empty( $catalogs ) ? 'no_catalog' : 'public_catalog' );
+        $contract['is_restricted'] = false;
+        $contract['catalogs'] = $catalogs;
+        $contract['restricted_catalogs'] = array_values( $restricted_catalogs );
+        return $contract;
+    }
+
+    if ( ! $user_id ) {
+        $user_id = get_current_user_id();
+    }
+
+    $contract = pam_build_product_access_contract( $product_id, PAM_ACCESS_DENY, 'login_required' );
+    $contract['is_restricted'] = true;
+    $contract['catalogs'] = $catalogs;
+    $contract['restricted_catalogs'] = array_values( $restricted_catalogs );
+    $contract['required_roles'] = $required_roles;
+
+    if ( ! $user_id ) {
+        return $contract;
+    }
+
+    $user = get_userdata( $user_id );
+    if ( ! $user ) {
+        $contract['reason'] = 'user_unavailable';
+        return $contract;
+    }
+
+    $matched_roles = array_values( array_intersect( $required_roles, (array) $user->roles ) );
+    if ( ! empty( $matched_roles ) ) {
+        $contract['status'] = PAM_ACCESS_ALLOW;
+        $contract['reason'] = 'required_role_matched';
+        $contract['can_view'] = true;
+        $contract['purchase_effect'] = 'passthrough';
+        $contract['matched_roles'] = $matched_roles;
+        return $contract;
+    }
+
+    $contract['reason'] = 'missing_required_role';
+    return $contract;
+}
+
+/**
+ * Compose PAM access with downstream stock/purchasability state.
+ *
+ * Precedence for native product-page consumers:
+ * 1. PAM deny hides the product and blocks purchase attempts.
+ * 2. PAM allow/unknown renders fail-soft and defers purchasability to Woo,
+ *    HP-Inventory, and HP-Checkout.
+ * 3. Unknown stock/purchasability remains unknown; PAM must not fill it in.
+ *
+ * @param int|WC_Product|array $product_or_access Product input or an access contract.
+ * @param int|null             $user_id User ID when a product is supplied.
+ * @param bool|null            $woo_purchasable WooCommerce purchasable truth, if known.
+ * @param string               $stock_status Stock state: available, unavailable, or unknown.
+ * @return array Composition contract.
+ */
+function pam_compose_product_access_and_stock_state( $product_or_access, $user_id = null, $woo_purchasable = null, $stock_status = 'unknown' ) {
+    $access = is_array( $product_or_access ) && isset( $product_or_access['status'] )
+        ? $product_or_access
+        : pam_get_product_access_contract( $product_or_access, $user_id );
+
+    $normalized_stock = in_array( $stock_status, array( 'available', 'unavailable' ), true ) ? $stock_status : 'unknown';
+    $page_visibility = PAM_ACCESS_DENY === $access['status'] ? 'hide' : 'show';
+    if ( PAM_ACCESS_UNKNOWN === $access['status'] ) {
+        $page_visibility = 'show_fail_soft';
+    }
+
+    $purchase_state = 'unknown';
+    $purchase_owner = 'WooCommerce/HP-Inventory/HP-Checkout';
+    $purchase_reason = 'defer_to_downstream';
+
+    if ( PAM_ACCESS_DENY === $access['status'] ) {
+        $purchase_state = 'blocked';
+        $purchase_owner = 'product-access-manager';
+        $purchase_reason = 'access_denied';
+    } elseif ( false === $woo_purchasable || 'unavailable' === $normalized_stock ) {
+        $purchase_state = 'blocked';
+        $purchase_reason = false === $woo_purchasable ? 'woocommerce_not_purchasable' : 'stock_unavailable';
+    } elseif ( true === $woo_purchasable && 'available' === $normalized_stock ) {
+        $purchase_state = 'available';
+        $purchase_reason = 'downstream_available';
+    }
+
+    return array(
+        'contract' => 'product-access-manager/product-access-stock-composition',
+        'version' => '1.0',
+        'access_status' => $access['status'],
+        'access_reason' => $access['reason'],
+        'stock_status' => $normalized_stock,
+        'page_visibility' => $page_visibility,
+        'purchase_state' => $purchase_state,
+        'purchase_owner' => $purchase_owner,
+        'purchase_reason' => $purchase_reason,
+        'access' => $access,
+    );
 }
 
 // ============================================================================
@@ -651,47 +876,16 @@ function pam_get_required_roles( $product ) {
  * @return bool True if user can view the product
  */
 function pam_user_can_view( $product, $user_id = null ) {
-    $product_id = $product instanceof WC_Product ? $product->get_id() : (int) $product;
-    
-    // Admin override - admins and shop managers can always see everything
-    if ( current_user_can( 'manage_woocommerce' ) ) {
-        pam_log( 'Admin user - allowing access to product ' . $product_id );
-        return true;
-    }
+    $contract = pam_get_product_access_contract( $product, $user_id );
 
-    // Check if product is restricted
-    $required_roles = pam_get_required_roles( $product_id );
-    if ( empty( $required_roles ) ) {
-        pam_log( 'Product ' . $product_id . ' is not restricted - allowing access' );
-        return true; // Not restricted - public product
-    }
-    
-    // Get user
-    if ( ! $user_id ) {
-        $user_id = get_current_user_id();
-    }
-    if ( ! $user_id ) {
-        pam_log( 'Product ' . $product_id . ' is restricted, user not logged in - denying access' );
-        return false; // Not logged in
-    }
-    
-    // Check if user has any required role
-    $user = get_userdata( $user_id );
-    if ( ! $user ) {
-        pam_log( 'Invalid user ID ' . $user_id . ' - denying access' );
-            return false;
-        }
-
-    foreach ( $required_roles as $role ) {
-        if ( in_array( $role, $user->roles ) ) {
-            pam_log( 'User ' . $user_id . ' has role ' . $role . ' - allowing access to product ' . $product_id );
-        return true;
-        }
-    }
-
-    pam_log( 'User ' . $user_id . ' does not have required roles for product ' . $product_id . ' - denying access' );
+    if ( PAM_ACCESS_DENY === $contract['status'] ) {
+        pam_log( 'Product ' . $contract['product_id'] . ' access denied: ' . $contract['reason'] );
         return false;
     }
+
+    pam_log( 'Product ' . $contract['product_id'] . ' access ' . $contract['status'] . ': ' . $contract['reason'] );
+    return true;
+}
 
 // ============================================================================
 // PRODUCT VISIBILITY FILTERS (Reveal to Authorized)
@@ -705,19 +899,22 @@ function pam_user_can_view( $product, $user_id = null ) {
  * @return bool Modified visibility
  */
 function pam_reveal_product( $visible, $product_id ) {
-    // If not restricted, use WC default visibility
-    if ( ! pam_is_restricted_product( $product_id ) ) {
-        return $visible;
-    }
-    
-    // If restricted and user can view, REVEAL it (override hidden status)
-    if ( pam_user_can_view( $product_id ) ) {
+    $contract = pam_get_product_access_contract( $product_id );
+
+    // If restricted and allowed, REVEAL it (override hidden status).
+    if ( PAM_ACCESS_ALLOW === $contract['status'] && ! empty( $contract['is_restricted'] ) ) {
         pam_log( 'Revealing restricted product ' . $product_id . ' to authorized user' );
         return true;
     }
 
-    // Otherwise keep WC default (hidden)
-    pam_log( 'Keeping product ' . $product_id . ' hidden from unauthorized user' );
+    if ( PAM_ACCESS_DENY === $contract['status'] ) {
+        pam_log( 'Keeping product ' . $product_id . ' hidden from unauthorized user' );
+        return false;
+    } elseif ( PAM_ACCESS_UNKNOWN === $contract['status'] ) {
+        pam_log( 'Product ' . $product_id . ' access unknown; preserving Woo visibility default' );
+    }
+
+    // Otherwise keep Woo default. Unknown is fail-soft and does not reveal.
     return $visible;
 }
 
@@ -731,8 +928,8 @@ function pam_reveal_product( $visible, $product_id ) {
  * @return bool Modified visibility
  */
 function pam_reveal_variation( $visible, $variation_id, $product_id, $variation ) {
-    // Check parent product access
-    return $visible && pam_user_can_view( $product_id );
+    $contract = pam_get_product_access_contract( $product_id );
+    return $visible && PAM_ACCESS_DENY !== $contract['status'];
 }
 
 /**
@@ -743,7 +940,12 @@ function pam_reveal_variation( $visible, $variation_id, $product_id, $variation 
  * @return bool Modified purchasable status
  */
 function pam_allow_purchase( $purchasable, $product ) {
-    return $purchasable && pam_user_can_view( $product );
+    $contract = pam_get_product_access_contract( $product );
+    if ( PAM_ACCESS_DENY === $contract['status'] ) {
+        return false;
+    }
+
+    return $purchasable;
 }
 
 /**
