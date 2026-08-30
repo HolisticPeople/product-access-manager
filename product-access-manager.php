@@ -3,7 +3,7 @@
  * Plugin Name: Product Access Manager
  * Plugin URI: 
  * Description: ACF-based product access control with session-based caching. Auto-detects restricted catalogs, uses fast post__not_in exclusion. HP and DCG catalogs public.
- * Version: 2.15.1
+ * Version: 2.15.2
  * Author: Amnon Manneberg
  * Author URI: 
  * Requires at least: 5.8
@@ -19,6 +19,7 @@
  * @version 2.1.0 - Added filtering for FiboSearch right panel (details view on hover/selection)
  * @version 2.1.1 - FIX: Run filter multiple times with delays to catch FiboSearch re-renders
  * @version 2.15.1 - Added typed allow/deny/unknown product access contract and gate precedence correction
+ * @version 2.15.2 - Declared compatibility with WooCommerce High-Performance Order Storage
  * @author Amnon Manneberg
  */
 
@@ -27,8 +28,25 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+/**
+ * Declare compatibility with WooCommerce High-Performance Order Storage.
+ *
+ * Product Access Manager reads product catalog metadata only and does not read
+ * or write WooCommerce order storage directly.
+ */
+function pam_declare_hpos_compatibility() {
+    if ( class_exists( Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
+        Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility(
+            'custom_order_tables',
+            __FILE__,
+            true
+        );
+    }
+}
+add_action( 'before_woocommerce_init', 'pam_declare_hpos_compatibility' );
+
 // Define plugin constants
-define( 'PAM_VERSION', '2.15.1' );
+define( 'PAM_VERSION', '2.15.2' );
 define( 'PAM_PLUGIN_FILE', __FILE__ );
 define( 'PAM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 

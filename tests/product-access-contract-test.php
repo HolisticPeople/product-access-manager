@@ -20,7 +20,18 @@ class WC_Product {
     }
 }
 
-function add_action() {}
+class PAM_Test_Features_Util {
+    public static $declarations = array();
+
+    public static function declare_compatibility( $feature_id, $plugin_file, $positive_compatibility = true ) {
+        self::$declarations[] = array( $feature_id, $plugin_file, $positive_compatibility );
+    }
+}
+class_alias( 'PAM_Test_Features_Util', 'Automattic\\WooCommerce\\Utilities\\FeaturesUtil' );
+
+function add_action( $hook_name, $callback = null, $priority = 10, $accepted_args = 1 ) {
+    $GLOBALS['pam_test_actions'][ $hook_name ][] = array( $callback, $priority, $accepted_args );
+}
 function add_filter() {}
 function plugin_dir_path( $file ) {
     return dirname( $file ) . '/';
@@ -119,9 +130,28 @@ pam_test( 'plugin header and constant versions match release version', function 
         throw new RuntimeException( 'Plugin header version was not found.' );
     }
 
-    pam_assert_same( '2.15.1', $matches[1], 'Plugin header should use release version.' );
-    pam_assert_same( '2.15.1', PAM_VERSION, 'PAM_VERSION should use release version.' );
+    pam_assert_same( '2.15.2', $matches[1], 'Plugin header should use release version.' );
+    pam_assert_same( '2.15.2', PAM_VERSION, 'PAM_VERSION should use release version.' );
     pam_assert_same( $matches[1], PAM_VERSION, 'Plugin header Version and PAM_VERSION should match.' );
+} );
+
+pam_test( 'declares WooCommerce HPOS compatibility before initialization', function () {
+    pam_assert_true(
+        isset( $GLOBALS['pam_test_actions']['before_woocommerce_init'] ),
+        'HPOS declaration should be registered on before_woocommerce_init.'
+    );
+
+    $registration = $GLOBALS['pam_test_actions']['before_woocommerce_init'][0];
+    pam_assert_same( 'pam_declare_hpos_compatibility', $registration[0], 'HPOS callback should be registered.' );
+
+    PAM_Test_Features_Util::$declarations = array();
+    call_user_func( $registration[0] );
+
+    pam_assert_same(
+        array( array( 'custom_order_tables', PAM_PLUGIN_FILE, true ) ),
+        PAM_Test_Features_Util::$declarations,
+        'Plugin should declare positive custom_order_tables compatibility for its main file.'
+    );
 } );
 
 pam_test( 'restricted guest returns deny', function () {
