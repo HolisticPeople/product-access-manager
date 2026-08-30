@@ -1,6 +1,6 @@
 # Product Access Manager
 
-**Version:** 2.8.1  
+**Version:** 2.15.2
 **Status:** Production Ready ✅  
 **WordPress:** 5.8+  
 **WooCommerce:** 6.0+  
@@ -304,7 +304,15 @@ product-access-manager/
 
 ## Version History
 
-### v2.8.1 (Current)
+### v2.15.2 (Current)
+- ✅ Declared compatibility with WooCommerce High-Performance Order Storage (HPOS)
+- ✅ Added regression coverage for the WooCommerce feature declaration
+
+### v2.15.1
+- ✅ Added the typed allow/deny/unknown product-access contract
+- ✅ Corrected product access gate precedence
+
+### v2.8.1
 - ✅ Optimized slider caching with shared cache
 - ✅ Eliminated redundant static variables
 - ✅ Production-ready with debug disabled
@@ -376,4 +384,4 @@ This plugin is **NOT fail-safe** from a security perspective:
 
 ---
 
-*Last Updated: October 10, 2025*
+*Last Updated: August 30, 2026*
